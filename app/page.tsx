@@ -191,8 +191,10 @@ export default function Home() {
       const manga = candidates[i];
       try {
         const res = await checkMangaOnlineUpdate(manga);
-        if (res.hasUpdate && res.latestChapter > manga.current_chapter) {
-          newUpdatesFound++;
+        if (res.foundFromWeb && res.latestChapter && res.latestChapter !== manga.latest_available_chapter) {
+          if (res.hasUpdate && res.latestChapter > manga.current_chapter) {
+            newUpdatesFound++;
+          }
           const updated: Manga = {
             ...manga,
             latest_available_chapter: res.latestChapter,

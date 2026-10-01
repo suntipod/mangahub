@@ -68,6 +68,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [updateCheckMsg, setUpdateCheckMsg] = useState<{
     text: string;
     isNew: boolean;
+    isError?: boolean;
   } | null>(null);
 
   // Search official covers from AniList & MangaDex
@@ -98,7 +99,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       sources,
     });
     setCheckingUpdate(false);
-    if (result.latestChapter) {
+    if (result.foundFromWeb && result.latestChapter) {
       setLatestChapter(result.latestChapter);
       if (result.hasUpdate) {
         setUpdateCheckMsg({
@@ -113,6 +114,12 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
           isNew: false,
         });
       }
+    } else {
+      setUpdateCheckMsg({
+        text: `⚠️ ไม่สามารถดึงเลขตอนล่าสุดจากเว็บที่ผูกไว้ได้ในขณะนี้ (หน้าเว็บอาจมีการตั้งค่าป้องกัน หรือเปลี่ยนโครงสร้าง)`,
+        isNew: false,
+        isError: true,
+      });
     }
   };
 
@@ -488,7 +495,9 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
             {updateCheckMsg && (
               <div
                 className={`p-2.5 rounded-xl text-xs font-medium ${
-                  updateCheckMsg.isNew
+                  updateCheckMsg.isError
+                    ? "bg-rose-950/40 border border-rose-500/30 text-rose-300"
+                    : updateCheckMsg.isNew
                     ? "bg-orange-950/40 border border-orange-500/30 text-orange-300"
                     : "bg-emerald-950/40 border border-emerald-500/30 text-emerald-300"
                 }`}

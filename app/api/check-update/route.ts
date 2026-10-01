@@ -39,6 +39,10 @@ function extractSeriesSlug(urlStr: string): string {
     const u = new URL(urlStr);
     let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
 
+    // Strip leading chapter prefix or number e.g. /14-return-of-the-legend -> /return-of-the-legend
+    pathname = pathname.replace(/^\/?\d+[-_]/, "/");
+
+    // Strip trailing chapter patterns e.g. -ตอนที่-39, -chapter-39, /168
     pathname = pathname
       .replace(/[-_](?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+(?:\.\d+)?$/i, "")
       .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?$/i, "")
@@ -54,6 +58,45 @@ function extractSeriesSlug(urlStr: string): string {
   } catch {
     return "";
   }
+}
+
+// Special API handler for ReadRealm (SPA site with REST API)
+async function checkReadRealm(urlStr: string): Promise<number | null> {
+  try {
+    const u = new URL(urlStr);
+    const m = u.pathname.match(/\/comic\/([a-zA-Z0-9_-]+)/);
+    if (!m) return null;
+
+    const bookId = m[1];
+    const apiUrl = `https://api.readrealm.co/reader/book/getListChaptersSectionPage?book_type=comic&book_id=${bookId}&start_index=1&sort=desc`;
+    const res = await fetch(apiUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+      },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+      const chapters: number[] = [];
+      for (const item of json.data) {
+        const titleMatch = (item.book_chapter_title || "").match(
+          /(?:ตอนที่|ตอน|ch|chapter)?\s*(\d+(?:\.\d+)?)/i
+        );
+        if (titleMatch) {
+          const num = parseFloat(titleMatch[1]);
+          if (!isNaN(num) && num > 0) chapters.push(num);
+        }
+      }
+      if (chapters.length > 0) {
+        return Math.max(...chapters);
+      }
+    }
+  } catch (e) {
+    console.warn("ReadRealm check error:", e);
+  }
+  return null;
 }
 
 // Find link back to series root from reader breadcrumb or "All Chapters"
@@ -95,6 +138,8 @@ function deriveSeriesUrl(urlStr: string): string | null {
   try {
     const u = new URL(urlStr);
     let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
+
+    pathname = pathname.replace(/^\/?\d+[-_]/, "/");
 
     const cleanPath = pathname
       .replace(/[-_](?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+(?:\.\d+)?$/i, "")
@@ -175,7 +220,6 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
   }
 
   // 3. THIRD PRIORITY: Fallback to General Links with Strict Slug Filtering
-  // Remove widgets, sidebars, popular items to prevent cross-manga contamination
   EXCLUDED_CONTAINERS.forEach((exSel) => {
     $(exSel).remove();
   });
@@ -210,22 +254,39 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
   return Array.from(foundChapters);
 }
 
-// Fetch helper with standard browser headers
+// Fetch helper with standard browser headers and timeout
 async function fetchPageHtml(url: string): Promise<string | null> {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
     const res = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept:
+        "Accept":
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Sec-CH-UA": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
       },
+      signal: controller.signal,
       next: { revalidate: 0 },
     });
-    if (!res.ok) return null;
+    clearTimeout(timeout);
+    if (!res.ok) {
+      console.warn(`Fetch ${url} failed with status: ${res.status}`);
+      return null;
+    }
     return await res.text();
-  } catch (e) {
+  } catch (e: any) {
+    console.warn(`Fetch error for ${url}:`, e?.message || e);
     return null;
   }
 }
@@ -252,18 +313,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 1. Check specialized platforms (e.g. ReadRealm API)
+    if (parsedUrl.hostname.includes("readrealm.co")) {
+      const rrLatest = await checkReadRealm(parsedUrl.href);
+      if (rrLatest !== null) {
+        return NextResponse.json({
+          success: true,
+          latestChapter: rrLatest,
+          currentChapter: Number(currentChapter),
+          hasUpdate: rrLatest > Number(currentChapter),
+          totalDetectedChapters: 1,
+        });
+      }
+    }
+
     const seriesSlug = extractSeriesSlug(parsedUrl.href);
-    let maxFoundChapter = Number(currentChapter);
     const checkedChapters: number[] = [];
 
-    // 1. Fetch primary URL provided
+    // 2. Fetch primary URL provided
     const primaryHtml = await fetchPageHtml(parsedUrl.href);
     if (primaryHtml) {
       const chapters = extractChaptersFromHtml(primaryHtml, seriesSlug, Number(currentChapter));
       checkedChapters.push(...chapters);
     }
 
-    // 2. If URL is a chapter page, also find and fetch the series root page for the complete chapter list
+    // 3. If URL is a chapter page, also find and fetch the series root page for the complete chapter list
     const breadcrumbSeriesUrl = primaryHtml ? findSeriesUrlFromHtml(primaryHtml, parsedUrl.href) : null;
     const derivedSeriesUrl = deriveSeriesUrl(parsedUrl.href);
     const seriesUrlToFetch = breadcrumbSeriesUrl || derivedSeriesUrl;
@@ -278,19 +352,24 @@ export async function POST(req: NextRequest) {
 
     if (checkedChapters.length > 0) {
       const highest = Math.max(...checkedChapters);
-      if (highest > maxFoundChapter) {
-        maxFoundChapter = highest;
-      }
+      const hasUpdate = highest > Number(currentChapter);
+      return NextResponse.json({
+        success: true,
+        latestChapter: highest,
+        currentChapter: Number(currentChapter),
+        hasUpdate,
+        totalDetectedChapters: checkedChapters.length,
+      });
     }
 
-    const hasUpdate = maxFoundChapter > Number(currentChapter);
-
+    // If 0 chapters were detected, do NOT pretend that currentChapter is the latest!
     return NextResponse.json({
-      success: true,
-      latestChapter: maxFoundChapter,
+      success: false,
+      error: "ไม่พบข้อมูลตอนในหน้าเว็บ หรือหน้าเว็บอาจมีระบบป้องกัน",
+      latestChapter: null,
       currentChapter: Number(currentChapter),
-      hasUpdate,
-      totalDetectedChapters: checkedChapters.length,
+      hasUpdate: false,
+      totalDetectedChapters: 0,
     });
   } catch (error: any) {
     return NextResponse.json(

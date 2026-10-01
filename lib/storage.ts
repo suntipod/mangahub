@@ -388,9 +388,9 @@ export async function removeManga(id: string): Promise<Manga[]> {
 }
 
 // Check updates for a manga across all its sources (primary + backups)
-export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChapter: number; hasUpdate: boolean }> {
+export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChapter: number; hasUpdate: boolean; foundFromWeb: boolean }> {
   if (!manga.sources || manga.sources.length === 0) {
-    return { latestChapter: manga.current_chapter, hasUpdate: false };
+    return { latestChapter: manga.current_chapter, hasUpdate: false, foundFromWeb: false };
   }
 
   let maxFoundFromWeb = 0;
@@ -415,7 +415,7 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
       });
       if (res.ok) {
         const json = await res.json();
-        if (json.success && typeof json.latestChapter === "number") {
+        if (json.success && typeof json.latestChapter === "number" && json.latestChapter > 0) {
           if (json.latestChapter > maxFoundFromWeb) {
             maxFoundFromWeb = json.latestChapter;
           }
@@ -434,5 +434,6 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
   return {
     latestChapter,
     hasUpdate: (maxFoundFromWeb > 0 && maxFoundFromWeb > manga.current_chapter) || foundUpdate,
+    foundFromWeb: maxFoundFromWeb > 0,
   };
 }
