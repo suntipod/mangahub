@@ -5,6 +5,7 @@ import { Manga, ReadingStatus, SupabaseConfig, DEFAULT_CATEGORIES } from "@/type
 import {
   getLocalMangas,
   saveLocalMangas,
+  deduplicateMangas,
   upsertManga,
   upsertMangas,
   incrementChapter,
@@ -96,7 +97,7 @@ export default function Home() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Load initial data (Local cache + Server Sync)
+  // Load initial data (Local cache + Cloud/Server Sync)
   useEffect(() => {
     // 1. Render local cache immediately
     const loadedMangas = getLocalMangas();
@@ -104,19 +105,20 @@ export default function Home() {
       setMangas(loadedMangas);
     }
 
-    // 2. Fetch and sync with Server database (also uploads any new manga from iPhone's cache!)
-    syncWithServer().then((serverData) => {
-      if (serverData && serverData.length > 0) {
-        setMangas(serverData);
-      }
-    });
-
     const loadedConfig = loadSupabaseConfig();
     setSupabaseConfig(loadedConfig);
 
-    // Initial background Supabase sync if enabled
+    // 2. Fetch from primary source (Supabase if enabled, otherwise local server fallback)
     if (loadedConfig.enabled) {
-      handleSync();
+      syncWithSupabase().then(() => {
+        setMangas(getLocalMangas());
+      });
+    } else {
+      syncWithServer().then((serverData) => {
+        if (serverData && serverData.length > 0) {
+          setMangas(serverData);
+        }
+      });
     }
 
     // Load custom categories
@@ -138,8 +140,9 @@ export default function Home() {
           try {
             const remote = await fetchRemoteMangas(client);
             if (remote && remote.length > 0) {
-              setMangas(remote);
-              saveLocalMangas(remote);
+              const deduped = deduplicateMangas(remote);
+              setMangas(deduped);
+              saveLocalMangas(deduped);
             }
           } catch (e) {
             console.error("Realtime fetch error:", e);
@@ -153,22 +156,24 @@ export default function Home() {
     };
   }, [supabaseConfig]);
 
-  // Handle Sync (syncs with both server and Supabase)
+  // Handle Sync (syncs with primary source: Supabase or local server)
   const handleSync = async () => {
     setIsSyncing(true);
-    // 1. Sync with local server
-    const serverData = await syncWithServer();
-    if (serverData && serverData.length > 0) {
-      setMangas(serverData);
-    }
-    // 2. Sync with Supabase if configured
-    if (supabaseConfig.enabled) {
-      const res = await syncWithSupabase();
-      if (res.synced > 0) {
+    try {
+      if (supabaseConfig.enabled) {
+        await syncWithSupabase();
         setMangas(getLocalMangas());
+      } else {
+        const serverData = await syncWithServer();
+        if (serverData && serverData.length > 0) {
+          setMangas(serverData);
+        }
       }
+    } catch (e) {
+      console.error("Sync error:", e);
+    } finally {
+      setIsSyncing(false);
     }
-    setIsSyncing(false);
   };
 
   // Check online updates for all mangas with linked sources

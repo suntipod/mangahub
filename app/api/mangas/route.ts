@@ -9,94 +9,9 @@ const DATA_DIR = process.env.VERCEL
   : path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "mangas.json");
 
-const INITIAL_MANGAS: Manga[] = [
-  {
-    id: "manga-sample-1",
-    title: "Nano Machine นาโนมาชิน",
-    alt_title: "Nano Mashin",
-    cover_url: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=600&auto=format&fit=crop&q=80",
-    current_chapter: 118,
-    latest_available_chapter: 250,
-    status: "reading",
-    tier: "S",
-    notes: "พระเอกสายโหด มีระบบนาโนแมชชีนคอยช่วยอัปเกรดวิทยายุทธ",
-    sources: [
-      {
-        id: "source-1-1",
-        manga_id: "manga-sample-1",
-        site_name: "Up-Manga",
-        base_url: "https://www.up-manga.com/manga/nano-machine",
-        current_chapter_url: "https://www.up-manga.com/manga/nano-machine/118",
-        is_primary: true,
-        is_active: true,
-      },
-      {
-        id: "source-1-2",
-        manga_id: "manga-sample-1",
-        site_name: "Slow-Manga",
-        base_url: "https://www.slow-manga.com/manga/nano-machine",
-        current_chapter_url: "https://www.slow-manga.com/manga/nano-machine/118",
-        is_primary: false,
-        is_active: true,
-      },
-    ],
-    last_read_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "manga-sample-2",
-    title: "Mercenary Enrollment พี่ชายบอดี้การ์ด",
-    alt_title: "Teenage Mercenary",
-    cover_url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80",
-    current_chapter: 278,
-    latest_available_chapter: 280,
-    status: "reading",
-    tier: "S",
-    notes: "สนุกมาก อดีตทหารรับจ้างกลับมาปกป้องน้องสาวและครอบครัว",
-    sources: [
-      {
-        id: "source-2-1",
-        manga_id: "manga-sample-2",
-        site_name: "Up-Manga",
-        base_url: "https://www.up-manga.com/manga/mercenary-enrollment",
-        current_chapter_url: "https://www.up-manga.com/manga/mercenary-enrollment/278",
-        is_primary: true,
-        is_active: true,
-      },
-    ],
-    last_read_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "manga-sample-3",
-    title: "Pick Me Up, Infinite Gacha",
-    alt_title: "Pick Me Up!",
-    cover_url: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600&auto=format&fit=crop&q=80",
-    current_chapter: 206,
-    latest_available_chapter: 210,
-    status: "reading",
-    tier: "A",
-    notes: "ผู้เล่นอันดับ 1 หลุดเข้าไปในเกมมือถือสุดโหดที่ตายแล้วตายเลย",
-    sources: [
-      {
-        id: "source-3-1",
-        manga_id: "manga-sample-3",
-        site_name: "Slow-Manga",
-        base_url: "https://www.slow-manga.com/manga/pick-me-up",
-        current_chapter_url: "https://www.slow-manga.com/manga/pick-me-up/206",
-        is_primary: true,
-        is_active: true,
-      },
-    ],
-    last_read_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
+const INITIAL_MANGAS: Manga[] = [];
 
-let memoryCache: Manga[] = INITIAL_MANGAS;
+let memoryCache: Manga[] = [];
 
 function readServerData(): Manga[] {
   try {

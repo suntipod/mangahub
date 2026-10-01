@@ -3,6 +3,105 @@ import { getSupabaseClient, syncMangaToRemote, deleteRemoteManga, fetchRemoteMan
 
 const LOCAL_STORAGE_KEY = "mangahub_local_mangas";
 
+// Helper to normalize manga title for robust duplicate detection
+export function normalizeTitle(title: string): string {
+  return (title || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .trim();
+}
+
+// Helper to remove duplicates across ID, normalized title, and primary source URL
+export function deduplicateMangas(mangas: Manga[]): Manga[] {
+  if (!Array.isArray(mangas)) return [];
+  const result: Manga[] = [];
+  const seenIds = new Set<string>();
+  const seenTitles = new Map<string, Manga>();
+  const seenUrls = new Map<string, Manga>();
+
+  for (const m of mangas) {
+    if (!m || !m.title) continue;
+    const normTitle = normalizeTitle(m.title);
+    const primaryUrl = (
+      m.sources?.find((s) => s.is_primary)?.base_url ||
+      m.sources?.[0]?.base_url ||
+      ""
+    )
+      .toLowerCase()
+      .replace(/\/$/, "");
+
+    let existing: Manga | undefined = undefined;
+    if (seenIds.has(m.id)) {
+      existing = result.find((x) => x.id === m.id);
+    } else if (normTitle && seenTitles.has(normTitle)) {
+      existing = seenTitles.get(normTitle);
+    } else if (primaryUrl && seenUrls.has(primaryUrl)) {
+      existing = seenUrls.get(primaryUrl);
+    }
+
+    if (!existing) {
+      seenIds.add(m.id);
+      if (normTitle) seenTitles.set(normTitle, m);
+      if (primaryUrl) seenUrls.set(primaryUrl, m);
+      result.push(m);
+    } else {
+      // Merge best attributes
+      const isUuid = (id: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      const bestId = isUuid(existing.id)
+        ? existing.id
+        : isUuid(m.id)
+        ? m.id
+        : existing.id;
+
+      const useCurrent =
+        new Date(m.updated_at || 0).getTime() >
+        new Date(existing.updated_at || 0).getTime();
+      const baseWinner = useCurrent ? m : existing;
+
+      // Merge sources cleanly without duplicate URLs
+      const combinedSources = [...(existing.sources || [])];
+      (m.sources || []).forEach((s) => {
+        const hasMatch = combinedSources.some(
+          (cs) =>
+            (cs.base_url && s.base_url && cs.base_url.toLowerCase() === s.base_url.toLowerCase()) ||
+            (cs.site_name && s.site_name && cs.site_name === s.site_name)
+        );
+        if (!hasMatch) combinedSources.push(s);
+      });
+
+      const mergedManga: Manga = {
+        ...baseWinner,
+        id: bestId,
+        current_chapter: Math.max(existing.current_chapter || 0, m.current_chapter || 0),
+        latest_available_chapter:
+          Math.max(existing.latest_available_chapter || 0, m.latest_available_chapter || 0) ||
+          undefined,
+        sources: combinedSources,
+        notes: existing.notes || m.notes,
+        category: existing.category || m.category,
+        cover_url: existing.cover_url || m.cover_url,
+        updated_at: new Date(
+          Math.max(
+            new Date(existing.updated_at || 0).getTime(),
+            new Date(m.updated_at || 0).getTime()
+          )
+        ).toISOString(),
+      };
+
+      const targetIdx = result.findIndex((x) => x.id === existing!.id);
+      if (targetIdx >= 0) {
+        result[targetIdx] = mergedManga;
+      }
+      seenIds.add(bestId);
+      if (normTitle) seenTitles.set(normTitle, mergedManga);
+      if (primaryUrl) seenUrls.set(primaryUrl, mergedManga);
+    }
+  }
+
+  return result;
+}
+
 export function getLocalMangas(): Manga[] {
   if (typeof window === "undefined") return [];
   try {
@@ -10,7 +109,7 @@ export function getLocalMangas(): Manga[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return deduplicateMangas(parsed);
       }
     }
   } catch (e) {
@@ -22,7 +121,8 @@ export function getLocalMangas(): Manga[] {
 export function saveLocalMangas(mangas: Manga[]) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(mangas));
+    const deduped = deduplicateMangas(mangas);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(deduped));
   } catch (e) {
     console.error("Error saving local mangas:", e);
   }
@@ -61,9 +161,10 @@ export async function syncWithServer(): Promise<Manga[]> {
       }
     }
 
-    // Merge server data with local cache
-    saveLocalMangas(serverMangas);
-    return serverMangas;
+    // Merge server data with local cache safely
+    const merged = deduplicateMangas([...serverMangas, ...localMangas]);
+    saveLocalMangas(merged);
+    return merged;
   } catch (e) {
     console.warn("Could not reach server database, using local cache:", e);
     return getLocalMangas();
@@ -99,20 +200,11 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
     const remoteMangas = await fetchRemoteMangas(client);
     const localMangas = getLocalMangas();
 
-    const mergedMap = new Map<string, Manga>();
-    localMangas.forEach((m) => mergedMap.set(m.id, m));
-
-    remoteMangas.forEach((rm) => {
-      const local = mergedMap.get(rm.id);
-      if (!local || new Date(rm.updated_at) > new Date(local.updated_at)) {
-        mergedMap.set(rm.id, rm);
-      }
-    });
-
-    const mergedList = Array.from(mergedMap.values());
+    // Deduplicate combined remote and local by ID, title, and source URL
+    const mergedList = deduplicateMangas([...remoteMangas, ...localMangas]);
     saveLocalMangas(mergedList);
 
-    // Also push merged to local server
+    // Also push merged to local server cache
     try {
       await fetch("/api/mangas", {
         method: "POST",
@@ -121,9 +213,12 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
       });
     } catch {}
 
-    // Push all to remote
+    // Only push items to remote that are truly new or updated locally
     for (const m of mergedList) {
-      await syncMangaToRemote(client, m);
+      const remoteItem = remoteMangas.find((rm) => rm.id === m.id);
+      if (!remoteItem || new Date(m.updated_at).getTime() > new Date(remoteItem.updated_at).getTime()) {
+        await syncMangaToRemote(client, m);
+      }
     }
 
     return { synced: mergedList.length };
@@ -186,18 +281,13 @@ export async function upsertMangas(mangasToAdd: Manga[]): Promise<Manga[]> {
   if (mangasToAdd.length === 0) return getLocalMangas();
 
   const current = getLocalMangas();
-  const currentMap = new Map<string, Manga>();
-  current.forEach((m) => currentMap.set(m.id, m));
-
   const now = new Date().toISOString();
-  mangasToAdd.forEach((m) => {
-    currentMap.set(m.id, {
-      ...m,
-      updated_at: now,
-    });
-  });
+  const stampedToAdd = mangasToAdd.map((m) => ({
+    ...m,
+    updated_at: now,
+  }));
 
-  const newList = Array.from(currentMap.values());
+  const newList = deduplicateMangas([...stampedToAdd, ...current]);
   saveLocalMangas(newList);
 
   // Push batch to server API
