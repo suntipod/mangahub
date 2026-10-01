@@ -13,9 +13,19 @@ import {
   Database,
   ExternalLink,
   Loader2,
+  Tags,
+  Plus,
+  Trash2,
+  Lock,
 } from "lucide-react";
 import { testSupabaseConnection } from "@/lib/supabase";
 import { getLocalMangas, saveLocalMangas } from "@/lib/storage";
+import {
+  getStoredCategories,
+  addCategory,
+  deleteCategory,
+  DEFAULT_CATEGORIES,
+} from "@/lib/categories";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -23,6 +33,7 @@ interface SettingsModalProps {
   config: SupabaseConfig;
   onSaveConfig: (config: SupabaseConfig) => void;
   onDataImported: () => void;
+  onCategoriesChanged?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -31,12 +42,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   config,
   onSaveConfig,
   onDataImported,
+  onCategoriesChanged,
 }) => {
   if (!isOpen) return null;
 
   const [url, setUrl] = useState(config.url || "");
   const [anonKey, setAnonKey] = useState(config.anonKey || "");
   const [enabled, setEnabled] = useState(config.enabled || false);
+
+  // Categories state
+  const [categories, setCategories] = useState<string[]>(getStoredCategories());
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -68,6 +84,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       enabled,
     });
     onClose();
+  };
+
+  // Add Category
+  const handleAddCategory = () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+    if (categories.includes(trimmed)) {
+      alert("มีหมวดหมู่นี้อยู่แล้ว");
+      return;
+    }
+    const updated = addCategory(trimmed);
+    setCategories(updated);
+    setNewCategoryName("");
+    onCategoriesChanged?.();
+  };
+
+  // Delete Category
+  const handleDeleteCategory = (cat: string) => {
+    if (DEFAULT_CATEGORIES.includes(cat)) {
+      alert("ไม่สามารถลบหมวดหมู่เริ่มต้นได้");
+      return;
+    }
+    if (confirm(`คุณต้องการลบหมวดหมู่ "${cat}" ใช่หรือไม่?`)) {
+      const updated = deleteCategory(cat);
+      setCategories(updated);
+      onCategoriesChanged?.();
+    }
   };
 
   // Export JSON backup
@@ -120,7 +163,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 ตั้งค่าระบบ & Cloud Sync
               </h2>
               <p className="text-[11px] text-gray-400">
-                ซิงค์ข้อมูลระหว่าง iPhone และ คอมพิวเตอร์ด้วย Supabase
+                จัดการหมวดหมู่, ซิงค์ Supabase ระหว่าง iPhone และ PC
               </p>
             </div>
           </div>
@@ -133,7 +176,89 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Categories Management Section */}
+          <div className="bg-[#141E33] border border-[#1F2E45] rounded-2xl p-4 space-y-3.5">
+            <div className="flex items-center gap-2">
+              <Tags className="w-4 h-4 text-violet-400" />
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                จัดการหมวดหมู่การ์ตูน (Categories)
+              </h3>
+            </div>
+            <p className="text-[11px] text-gray-400">
+              กำหนดหมวดหมู่เพื่อจัดระเบียบชั้นหนังสือ (มี 3 หมวดหมู่หลักให้พร้อมใช้ สามารถเพิ่มหมวดหมู่เองได้)
+            </p>
+
+            {/* Existing Categories List */}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {categories.map((cat) => {
+                const isDefault = DEFAULT_CATEGORIES.includes(cat);
+                const isDojin = cat.toLowerCase().includes("dojin") || cat.includes("โดจิน");
+                const isNTR = cat.toUpperCase().includes("NTR");
+
+                return (
+                  <div
+                    key={cat}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
+                      isDojin
+                        ? "bg-rose-950/40 text-rose-300 border-rose-800/40"
+                        : isNTR
+                        ? "bg-purple-950/40 text-purple-300 border-purple-800/40"
+                        : "bg-[#0D1322] text-gray-200 border-[#1F2E45]"
+                    }`}
+                  >
+                    <span>
+                      {isDojin ? "🔞 " : isNTR ? "💔 " : "📚 "}
+                      {cat}
+                    </span>
+
+                    {isDefault ? (
+                      <span
+                        title="หมวดหมู่หลัก"
+                        className="text-gray-500 ml-1"
+                      >
+                        <Lock className="w-3 h-3" />
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleDeleteCategory(cat)}
+                        title="ลบหมวดหมู่นี้"
+                        className="text-gray-400 hover:text-red-400 p-0.5 rounded transition ml-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add New Category Input */}
+            <div className="flex gap-2 pt-1">
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddCategory();
+                  }
+                }}
+                placeholder="พิมพ์ชื่อหมวดหมู่ใหม่ เช่น มังฮวาเกาหลี, Yaoi..."
+                className="flex-1 bg-[#0D1322] border border-[#1F2E45] rounded-xl px-3 py-2 text-xs text-gray-200 outline-none focus:border-violet-500 placeholder-gray-500"
+              />
+              <button
+                type="button"
+                onClick={handleAddCategory}
+                className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-md shadow-violet-600/30 active:scale-95 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>เพิ่ม</span>
+              </button>
+            </div>
+          </div>
+
           {/* Supabase Section */}
           <div className="bg-[#141E33] border border-[#1F2E45] rounded-2xl p-4 space-y-4">
             <div className="flex items-center justify-between">

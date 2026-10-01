@@ -21,12 +21,19 @@ export interface Manga {
   latest_available_chapter?: number;
   status: ReadingStatus;
   tier: TierRating;
+  category?: string;        // e.g. "การ์ตูนทั่วไป", "Dojin", "NTR"
   notes?: string;
   sources: MangaSource[];
   last_read_at: string;     // ISO timestamp
   created_at: string;       // ISO timestamp
   updated_at: string;       // ISO timestamp
 }
+
+export const DEFAULT_CATEGORIES = [
+  "การ์ตูนทั่วไป",
+  "Dojin",
+  "NTR",
+];
 
 export interface ScrapedMangaData {
   title: string;

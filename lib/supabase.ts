@@ -97,6 +97,25 @@ export async function testSupabaseConnection(url: string, anonKey: string): Prom
   }
 }
 
+// Helpers to preserve manga category in Supabase notes field safely
+export function decodeNotesAndCategory(rawNotes?: string): { notes: string; category: string } {
+  if (!rawNotes) return { notes: "", category: "การ์ตูนทั่วไป" };
+  const match = rawNotes.match(/^\[category:([^\]]+)\]\s*([\s\S]*)/i);
+  if (match) {
+    return {
+      category: match[1].trim() || "การ์ตูนทั่วไป",
+      notes: match[2].trim(),
+    };
+  }
+  return { notes: rawNotes.trim(), category: "การ์ตูนทั่วไป" };
+}
+
+export function encodeNotesWithCategory(notes?: string, category?: string): string {
+  const cat = category || "การ์ตูนทั่วไป";
+  const cleanNotes = (notes || "").replace(/^\[category:[^\]]+\]\s*/i, "").trim();
+  return `[category:${cat}] ${cleanNotes}`.trim();
+}
+
 // Fetch all mangas and their sources from Supabase
 export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]> {
   const { data: mangasData, error: mError } = await client
@@ -128,26 +147,32 @@ export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]
     sourcesByMangaId.set(s.manga_id, list);
   });
 
-  return mangasData.map((m: any) => ({
-    id: m.id,
-    title: m.title,
-    alt_title: m.alt_title,
-    cover_url: m.cover_url,
-    current_chapter: Number(m.current_chapter),
-    latest_available_chapter: m.latest_available_chapter ? Number(m.latest_available_chapter) : undefined,
-    status: m.status,
-    tier: m.tier || "none",
-    notes: m.notes,
-    sources: sourcesByMangaId.get(m.id) || [],
-    last_read_at: m.last_read_at,
-    created_at: m.created_at,
-    updated_at: m.updated_at,
-  }));
+  return mangasData.map((m: any) => {
+    const { notes: decodedNotes, category: decodedCat } = decodeNotesAndCategory(m.notes);
+    return {
+      id: m.id,
+      title: m.title,
+      alt_title: m.alt_title,
+      cover_url: m.cover_url,
+      current_chapter: Number(m.current_chapter),
+      latest_available_chapter: m.latest_available_chapter ? Number(m.latest_available_chapter) : undefined,
+      status: m.status,
+      tier: m.tier || "none",
+      category: m.category || decodedCat,
+      notes: decodedNotes,
+      sources: sourcesByMangaId.get(m.id) || [],
+      last_read_at: m.last_read_at,
+      created_at: m.created_at,
+      updated_at: m.updated_at,
+    };
+  });
 }
 
 // Upsert manga and sources to Supabase
 export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): Promise<void> {
   const mangaId = ensureUUID(manga.id);
+  const encodedNotes = encodeNotesWithCategory(manga.notes, manga.category);
+
   const { error: mError } = await client.from("mangas").upsert({
     id: mangaId,
     title: manga.title,
@@ -157,7 +182,7 @@ export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): P
     latest_available_chapter: manga.latest_available_chapter,
     status: manga.status,
     tier: manga.tier,
-    notes: manga.notes,
+    notes: encodedNotes,
     last_read_at: manga.last_read_at,
     updated_at: new Date().toISOString(),
   });

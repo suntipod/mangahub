@@ -65,18 +65,39 @@ export const MangaCard: React.FC<MangaCardProps> = ({
         )}
 
         {/* Top Badges */}
-        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none">
+        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-1.5 pointer-events-none">
           {/* Chapter Badge */}
-          <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-md">
+          <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-md shrink-0">
             ตอนที่ {manga.current_chapter}
           </span>
 
-          {/* Tier or Status */}
-          {manga.tier && manga.tier !== "none" && (
-            <span className="bg-amber-500/90 backdrop-blur-md text-black font-extrabold text-[11px] px-2 py-0.5 rounded-md shadow">
-              Tier {manga.tier}
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Category Badge */}
+            {manga.category && (
+              <span
+                className={`backdrop-blur-md text-[10px] font-extrabold px-2 py-0.5 rounded-md shadow ${
+                  manga.category.toLowerCase().includes("dojin")
+                    ? "bg-rose-600/90 text-white"
+                    : manga.category.toLowerCase().includes("ntr")
+                    ? "bg-purple-600/90 text-white"
+                    : "bg-slate-800/90 text-gray-200 border border-slate-700/50"
+                }`}
+              >
+                {manga.category.toLowerCase().includes("dojin")
+                  ? "🔞 Dojin"
+                  : manga.category.toLowerCase().includes("ntr")
+                  ? "💔 NTR"
+                  : manga.category}
+              </span>
+            )}
+
+            {/* Tier or Status */}
+            {manga.tier && manga.tier !== "none" && (
+              <span className="bg-amber-500/90 backdrop-blur-md text-black font-extrabold text-[11px] px-2 py-0.5 rounded-md shadow">
+                Tier {manga.tier}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Multi-source indicator pill */}

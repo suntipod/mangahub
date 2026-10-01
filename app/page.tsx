@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Manga, ReadingStatus, SupabaseConfig } from "@/types/manga";
+import { Manga, ReadingStatus, SupabaseConfig, DEFAULT_CATEGORIES } from "@/types/manga";
 import {
   getLocalMangas,
   saveLocalMangas,
@@ -18,6 +18,7 @@ import {
   getSupabaseClient,
   fetchRemoteMangas,
 } from "@/lib/supabase";
+import { getStoredCategories } from "@/lib/categories";
 import { Header } from "@/components/Header";
 import { BottomNav } from "@/components/BottomNav";
 import { MangaCard } from "@/components/MangaCard";
@@ -29,7 +30,6 @@ import {
   Plus,
   Sparkles,
   ArrowUpDown,
-  Compass,
   BookmarkCheck,
   Clock,
   CheckCircle2,
@@ -45,6 +45,8 @@ export default function Home() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Filters & Search
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [availableCategories, setAvailableCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [currentTab, setCurrentTab] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "title" | "chapter">("recent");
@@ -76,6 +78,9 @@ export default function Home() {
     if (loadedConfig.enabled) {
       handleSync();
     }
+
+    // Load custom categories
+    setAvailableCategories(getStoredCategories());
   }, []);
 
   // Supabase Realtime Subscription setup
@@ -169,7 +174,14 @@ export default function Home() {
   const filteredMangas = useMemo(() => {
     return mangas
       .filter((m) => {
-        // Tab filter
+        // Category filter
+        if (selectedCategory !== "all") {
+          const mangaCategory = m.category || "การ์ตูนทั่วไป";
+          if (mangaCategory !== selectedCategory) {
+            return false;
+          }
+        }
+        // Status Tab filter
         if (currentTab !== "all" && m.status !== currentTab) {
           return false;
         }
@@ -199,12 +211,17 @@ export default function Home() {
         }
         return 0;
       });
-  }, [mangas, currentTab, searchQuery, sortBy]);
+  }, [mangas, selectedCategory, currentTab, searchQuery, sortBy]);
 
-  // Counts for tabs
-  const readingCount = mangas.filter((m) => m.status === "reading").length;
-  const onHoldCount = mangas.filter((m) => m.status === "on_hold").length;
-  const completedCount = mangas.filter((m) => m.status === "completed").length;
+  // Counts for status tabs (respecting selectedCategory)
+  const categoryScopedMangas = useMemo(() => {
+    if (selectedCategory === "all") return mangas;
+    return mangas.filter((m) => (m.category || "การ์ตูนทั่วไป") === selectedCategory);
+  }, [mangas, selectedCategory]);
+
+  const readingCount = categoryScopedMangas.filter((m) => m.status === "reading").length;
+  const onHoldCount = categoryScopedMangas.filter((m) => m.status === "on_hold").length;
+  const completedCount = categoryScopedMangas.filter((m) => m.status === "completed").length;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#090D16] text-gray-100 pb-24 sm:pb-12">
@@ -249,72 +266,122 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Filter Tabs & Sorting Toolbar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-          {/* Status Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+        {/* Category Filter Toolbar */}
+        <div className="space-y-2.5 pt-1">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
             <button
-              onClick={() => setCurrentTab("all")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 ${
-                currentTab === "all"
+              onClick={() => setSelectedCategory("all")}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                selectedCategory === "all"
                   ? "bg-violet-600 text-white shadow-md shadow-violet-600/30"
                   : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
               }`}
             >
-              ทั้งหมด ({mangas.length})
+              <span>🗂️ ทุกหมวดหมู่</span>
+              <span className="text-[10px] opacity-75">({mangas.length})</span>
             </button>
 
-            <button
-              onClick={() => setCurrentTab("reading")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
-                currentTab === "reading"
-                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
-                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
-              }`}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>กำลังอ่าน ({readingCount})</span>
-            </button>
+            {availableCategories.map((cat) => {
+              const isSelected = selectedCategory === cat;
+              const count = mangas.filter((m) => (m.category || "การ์ตูนทั่วไป") === cat).length;
+              const isDojin = cat.toLowerCase().includes("dojin") || cat.includes("โดจิน");
+              const isNTR = cat.toUpperCase().includes("NTR");
 
-            <button
-              onClick={() => setCurrentTab("on_hold")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
-                currentTab === "on_hold"
-                  ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
-                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
-              }`}
-            >
-              <BookmarkCheck className="w-3.5 h-3.5" />
-              <span>ดองไว้ ({onHoldCount})</span>
-            </button>
-
-            <button
-              onClick={() => setCurrentTab("completed")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
-                currentTab === "completed"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
-                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
-              }`}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>อ่านจบ ({completedCount})</span>
-            </button>
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                    isSelected
+                      ? isDojin
+                        ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
+                        : isNTR
+                        ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                        : "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : isDojin
+                      ? "bg-rose-950/30 text-rose-300 hover:bg-rose-950/50 border border-rose-800/40"
+                      : isNTR
+                      ? "bg-purple-950/30 text-purple-300 hover:bg-purple-950/50 border border-purple-800/40"
+                      : "bg-[#131B2E] text-gray-300 hover:text-white border border-[#1F2E45]"
+                  }`}
+                >
+                  <span>
+                    {isDojin ? "🔞 " : isNTR ? "💔 " : "📚 "}
+                    {cat}
+                  </span>
+                  <span className="text-[10px] opacity-75">({count})</span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Sort Selector */}
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <span className="text-xs text-gray-400 flex items-center gap-1">
-              <ArrowUpDown className="w-3.5 h-3.5" /> เรียงตาม:
-            </span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-[#131B2E] border border-[#1F2E45] rounded-xl px-2.5 py-1.5 text-xs text-gray-200 outline-none"
-            >
-              <option value="recent">อ่านล่าสุด</option>
-              <option value="title">ชื่อเรื่อง (ก-ฮ / A-Z)</option>
-              <option value="chapter">เลขตอนมากสุด</option>
-            </select>
+          {/* Status Tabs & Sorting Toolbar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* Status Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+              <button
+                onClick={() => setCurrentTab("all")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 ${
+                  currentTab === "all"
+                    ? "bg-gray-700/80 text-white"
+                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                }`}
+              >
+                สถานะทั้งหมด ({categoryScopedMangas.length})
+              </button>
+
+              <button
+                onClick={() => setCurrentTab("reading")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                  currentTab === "reading"
+                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>กำลังอ่าน ({readingCount})</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab("on_hold")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                  currentTab === "on_hold"
+                    ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
+                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                }`}
+              >
+                <BookmarkCheck className="w-3.5 h-3.5" />
+                <span>ดองไว้ ({onHoldCount})</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab("completed")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                  currentTab === "completed"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
+                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>อ่านจบ ({completedCount})</span>
+              </button>
+            </div>
+
+            {/* Sort Selector */}
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <span className="text-xs text-gray-400 flex items-center gap-1">
+                <ArrowUpDown className="w-3.5 h-3.5" /> เรียงตาม:
+              </span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-[#131B2E] border border-[#1F2E45] rounded-xl px-2.5 py-1.5 text-xs text-gray-200 outline-none"
+              >
+                <option value="recent">อ่านล่าสุด</option>
+                <option value="title">ชื่อเรื่อง (ก-ฮ / A-Z)</option>
+                <option value="chapter">เลขตอนมากสุด</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -386,6 +453,7 @@ export default function Home() {
         config={supabaseConfig}
         onSaveConfig={handleSaveConfig}
         onDataImported={() => setMangas(getLocalMangas())}
+        onCategoriesChanged={() => setAvailableCategories(getStoredCategories())}
       />
     </div>
   );

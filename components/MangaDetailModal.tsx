@@ -15,6 +15,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { computeNextChapterUrl } from "@/lib/storage";
+import { getStoredCategories } from "@/lib/categories";
 
 interface MangaDetailModalProps {
   manga: Manga | null;
@@ -34,6 +35,8 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [currentChapter, setCurrentChapter] = useState(manga.current_chapter);
   const [status, setStatus] = useState<ReadingStatus>(manga.status);
   const [tier, setTier] = useState<TierRating>(manga.tier);
+  const [category, setCategory] = useState<string>(manga.category || "การ์ตูนทั่วไป");
+  const [availableCategories] = useState<string[]>(getStoredCategories());
   const [notes, setNotes] = useState(manga.notes || "");
   const [sources, setSources] = useState<MangaSource[]>(manga.sources);
   const [newSourceUrl, setNewSourceUrl] = useState("");
@@ -105,6 +108,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       current_chapter: currentChapter,
       status,
       tier,
+      category,
       notes,
       sources,
       last_read_at: new Date().toISOString(),
@@ -183,6 +187,23 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                   <option value="A">🔥 Tier A (สนุกมาก)</option>
                   <option value="B">✨ Tier B (สนุกดี)</option>
                   <option value="C">👍 Tier C (พอใช้)</option>
+                </select>
+
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="bg-[#182338] border border-[#233554] text-xs font-bold rounded-xl px-2.5 py-1.5 text-violet-300 outline-none"
+                >
+                  {availableCategories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat.toLowerCase().includes("dojin")
+                        ? "🔞 "
+                        : cat.toLowerCase().includes("ntr")
+                        ? "💔 "
+                        : "📚 "}
+                      {cat}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Manga, MangaSource } from "@/types/manga";
+import { getStoredCategories } from "@/lib/categories";
 import {
   X,
   Sparkles,
@@ -17,6 +18,7 @@ import {
   BookOpen,
   Trash2,
   Edit3,
+  Folder,
 } from "lucide-react";
 
 interface AddMangaModalProps {
@@ -89,6 +91,11 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 
   // Active Tab: "batch" (default) or "single"
   const [activeTab, setActiveTab] = useState<"batch" | "single">("batch");
+
+  // Available Categories
+  const [availableCategories] = useState<string[]>(getStoredCategories());
+  const [category, setCategory] = useState<string>("การ์ตูนทั่วไป");
+  const [batchCategory, setBatchCategory] = useState<string>("การ์ตูนทั่วไป");
 
   // --- Single Tab State ---
   const [url, setUrl] = useState("");
@@ -206,6 +213,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       current_chapter: chapter,
       status: "reading",
       tier: "none",
+      category: category || "การ์ตูนทั่วไป",
       sources: [initialSource],
       last_read_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -306,6 +314,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         current_chapter: chosenChapter,
         status: "reading",
         tier: "none",
+        category: batchCategory || "การ์ตูนทั่วไป",
         sources: [
           {
             id: sourceId,
@@ -430,6 +439,41 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 
               {!batchFinished ? (
                 <>
+                  {/* Category Selector for Batch */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-[#141E33] border border-[#1F2E45] rounded-2xl">
+                    <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                      <Folder className="w-3.5 h-3.5 text-violet-400" />
+                      <span>จัดเข้าหมวดหมู่:</span>
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {availableCategories.map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setBatchCategory(cat)}
+                          className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+                            batchCategory === cat
+                              ? cat.toLowerCase().includes("dojin")
+                                ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
+                                : cat.toLowerCase().includes("ntr")
+                                ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                                : "bg-violet-600 text-white shadow-md shadow-violet-600/30"
+                              : "bg-[#0D1322] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+                          }`}
+                        >
+                          <span>
+                            {cat.toLowerCase().includes("dojin")
+                              ? "🔞 "
+                              : cat.toLowerCase().includes("ntr")
+                              ? "💔 "
+                              : "📚 "}
+                            {cat}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
@@ -725,6 +769,39 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                           onChange={(e) => setSiteName(e.target.value)}
                           className="w-full bg-[#0D1322] border border-[#1F2E45] rounded-xl px-3 py-2 text-xs text-gray-200 outline-none"
                         />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-gray-400 block mb-1">
+                        หมวดหมู่
+                      </label>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {availableCategories.map((cat) => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setCategory(cat)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                              category === cat
+                                ? cat.toLowerCase().includes("dojin")
+                                  ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
+                                  : cat.toLowerCase().includes("ntr")
+                                  ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                                  : "bg-violet-600 text-white shadow-md shadow-violet-600/30"
+                                : "bg-[#0D1322] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+                            }`}
+                          >
+                            <span>
+                              {cat.toLowerCase().includes("dojin")
+                                ? "🔞 "
+                                : cat.toLowerCase().includes("ntr")
+                                ? "💔 "
+                                : "📚 "}
+                              {cat}
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     </div>
 
