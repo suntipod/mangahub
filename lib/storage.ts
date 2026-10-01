@@ -253,6 +253,28 @@ export async function incrementChapter(id: string): Promise<Manga[]> {
   return upsertManga(updated);
 }
 
+// Quick set chapter directly (e.g. Sync to latest available chapter)
+export async function setChapter(id: string, chapterNumber: number): Promise<Manga[]> {
+  const current = getLocalMangas();
+  const target = current.find((m) => m.id === id);
+  if (!target) return current;
+
+  const updatedSources = target.sources.map((s) => ({
+    ...s,
+    current_chapter_url: computeNextChapterUrl(s.current_chapter_url || s.base_url, chapterNumber),
+  }));
+
+  const updated: Manga = {
+    ...target,
+    current_chapter: chapterNumber,
+    sources: updatedSources,
+    last_read_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  return upsertManga(updated);
+}
+
 // Delete a manga
 export async function removeManga(id: string): Promise<Manga[]> {
   const current = getLocalMangas();

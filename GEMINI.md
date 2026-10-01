@@ -1,7 +1,7 @@
 # Project Agent Rules & Skills Configuration (manga)
 
 <scope>
-- **Project Boundary**: All agent skills, runbooks, and configurations are strictly isolated within this project directory (`D:\MyProject\manga`).
+- **Project Boundary**: All agent skills, runbooks, and configurations are strictly isolated within this project directory (`d:\My project webapp\manga` / `./`).
 - **Forbidden**: Do NOT read, install, or edit any files in global/system directories (`~/.antigravity`, `~/.gemini`, or user Home directory).
 - **Skills Source**: All skills MUST be read from `./.agents/skills/` using the local paths configured in `./.agents/skills.json` and `./.agents/rules/auto-skills-dispatcher.md`.
 </scope>

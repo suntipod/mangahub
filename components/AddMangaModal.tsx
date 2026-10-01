@@ -19,6 +19,8 @@ import {
   Trash2,
   Edit3,
   Folder,
+  ClipboardPaste,
+  ClipboardCheck,
 } from "lucide-react";
 
 interface AddMangaModalProps {
@@ -141,9 +143,14 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
     setBatchItems((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  // Auto-scrape single URL
-  const handleScrape = async () => {
-    if (!url.trim()) {
+  // Quick Paste feedback states
+  const [pasteSingleSuccess, setPasteSingleSuccess] = useState(false);
+  const [pasteBatchSuccess, setPasteBatchSuccess] = useState(false);
+
+  // Auto-scrape single URL (supports direct URL parameter from clipboard)
+  const handleScrape = async (overrideUrl?: string) => {
+    const targetUrl = (overrideUrl !== undefined ? overrideUrl : url).trim();
+    if (!targetUrl) {
       setErrorMsg("กรุณาวาง URL หน้าเรื่องการ์ตูนก่อนครับ");
       return;
     }
@@ -156,7 +163,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       const res = await fetch("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: targetUrl }),
       });
 
       const json = await res.json();
@@ -178,13 +185,65 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
     } catch (e: any) {
       setErrorMsg(e.message || "เกิดข้อผิดพลาดในการดึงข้อมูล กรุณากรอกข้อมูลเองด้านล่าง");
       try {
-        const u = new URL(url);
+        const u = new URL(targetUrl);
         setSiteName(u.hostname.replace(/^www\./, "").split(".")[0]);
       } catch {
         setSiteName("เว็บอ่าน");
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Quick 1-Tap Paste & Scrape for Single Tab
+  const handlePasteAndScrapeSingle = async () => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        setErrorMsg("เบราว์เซอร์นี้ไม่อนุญาตให้อ่านคลิปบอร์ดอัตโนมัติ กรุณากดแตะค้างแล้ววางด้วยตนเองครับ");
+        return;
+      }
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText || !clipText.trim()) {
+        setErrorMsg("ไม่พบข้อความในคลิปบอร์ด กรุณาก๊อปปี้ลิงก์หน้าการ์ตูนมาก่อนครับ");
+        return;
+      }
+
+      // Extract URL from clipboard text in case user copied a line with extra text
+      const urlMatch = clipText.match(/(https?:\/\/[^\s]+)/i);
+      const targetUrl = urlMatch ? urlMatch[1] : clipText.trim();
+
+      setUrl(targetUrl);
+      setPasteSingleSuccess(true);
+      setTimeout(() => setPasteSingleSuccess(false), 1500);
+
+      // Immediately trigger scrape
+      handleScrape(targetUrl);
+    } catch (err: any) {
+      console.warn("Clipboard access denied:", err);
+      setErrorMsg("ไม่สามารถเข้าถึงคลิปบอร์ดได้ (เบราว์เซอร์อาจต้องกดยืนยันการอนุญาตสิทธิ์ หรือวางด้วยตนเอง)");
+    }
+  };
+
+  // Quick 1-Tap Paste for Batch Tab
+  const handlePasteBatchFromClipboard = async () => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        setBatchError("เบราว์เซอร์นี้ไม่อนุญาตให้อ่านคลิปบอร์ดอัตโนมัติ กรุณากดแตะค้างแล้ววางด้วยตนเองครับ");
+        return;
+      }
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText || !clipText.trim()) {
+        setBatchError("ไม่พบข้อความในคลิปบอร์ด กรุณาก๊อปปี้ลิงก์หน้าการ์ตูนมาก่อนครับ");
+        return;
+      }
+
+      const newText = batchText.trim() ? `${batchText.trim()}\n${clipText.trim()}` : clipText.trim();
+      handleBatchTextChange(newText);
+      setPasteBatchSuccess(true);
+      setTimeout(() => setPasteBatchSuccess(false), 1500);
+    } catch (err: any) {
+      console.warn("Clipboard access denied:", err);
+      setBatchError("ไม่สามารถเข้าถึงคลิปบอร์ดได้ (เบราว์เซอร์อาจต้องกดยืนยันการอนุญาตสิทธิ์ หรือวางด้วยตนเอง)");
     }
   };
 
@@ -480,11 +539,36 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                         <span>วางลิงก์ทั้งหมดที่ก๊อปปี้มาที่นี่</span>
                         <span className="text-red-400">*</span>
                       </label>
-                      {batchItems.length > 0 && (
-                        <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-                          ตรวจพบ {batchItems.length} เรื่อง
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {batchItems.length > 0 && (
+                          <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                            ตรวจพบ {batchItems.length} เรื่อง
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handlePasteBatchFromClipboard}
+                          disabled={isBatchRunning}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold transition shadow-sm active:scale-95 ${
+                            pasteBatchSuccess
+                              ? "bg-emerald-600 text-white border border-emerald-500"
+                              : "bg-violet-600/30 hover:bg-violet-600/50 text-violet-300 hover:text-white border border-violet-500/40"
+                          }`}
+                          title="ดึงข้อความจากคลิปบอร์ดมาวางทันที (ไม่ต้องกดจิ้มค้าง)"
+                        >
+                          {pasteBatchSuccess ? (
+                            <>
+                              <ClipboardCheck className="w-3.5 h-3.5 text-emerald-300" />
+                              <span>วางสำเร็จ!</span>
+                            </>
+                          ) : (
+                            <>
+                              <ClipboardPaste className="w-3.5 h-3.5 text-violet-400" />
+                              <span>วางจากคลิปบอร์ด</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <textarea
                       rows={4}
@@ -656,10 +740,35 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
             <div className="space-y-4">
               {/* URL Input Box */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
-                  <span>URL หน้าเรื่อง หรือหน้าตอนล่าสุดที่เปิดค้างไว้</span>
-                  <span className="text-red-400">*</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                    <span>URL หน้าเรื่อง หรือหน้าตอนล่าสุดที่เปิดค้างไว้</span>
+                    <span className="text-red-400">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handlePasteAndScrapeSingle}
+                    disabled={loading}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold transition shadow-sm active:scale-95 ${
+                      pasteSingleSuccess
+                        ? "bg-emerald-600 text-white border border-emerald-500"
+                        : "bg-violet-600/30 hover:bg-violet-600/50 text-violet-300 hover:text-white border border-violet-500/40"
+                    }`}
+                    title="วางลิงก์จากคลิปบอร์ดและดึงข้อมูลอัตโนมัติทันที"
+                  >
+                    {pasteSingleSuccess ? (
+                      <>
+                        <ClipboardCheck className="w-3.5 h-3.5 text-emerald-300" />
+                        <span>วาง &amp; กำลังดึง...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ClipboardPaste className="w-3.5 h-3.5 text-violet-400" />
+                        <span>วาง &amp; ดึงทันที</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="url"
@@ -672,7 +781,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                     className="flex-1 bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 outline-none transition"
                   />
                   <button
-                    onClick={handleScrape}
+                    onClick={() => handleScrape()}
                     disabled={loading}
                     className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md shadow-violet-600/30 transition shrink-0"
                   >

@@ -1,6 +1,6 @@
 # Project Agent Guidelines (manga)
 
-This file configures agent behaviors, rules, and skills for `D:\MyProject\manga`.
+This file configures agent behaviors, rules, and skills for this project workspace (`d:\My project webapp\manga`).
 
 ## 1. Project-Only Scope Constraint
 - All operations, skills, and configuration files MUST be read strictly from this project workspace.

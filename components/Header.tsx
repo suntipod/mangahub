@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Cloud, Wifi, Flame, Loader2 } from "lucide-react";
+import { BookOpen, RefreshCw, Settings, Plus, Cloud, Wifi, Flame, Loader2, Eye, EyeOff } from "lucide-react";
 import { SupabaseConfig } from "@/types/manga";
 
 interface HeaderProps {
@@ -15,6 +15,8 @@ interface HeaderProps {
   onCheckUpdates?: () => void;
   isCheckingUpdates?: boolean;
   checkProgress?: { current: number; total: number } | null;
+  isDiscreetMode?: boolean;
+  onToggleDiscreet?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,9 +30,11 @@ export const Header: React.FC<HeaderProps> = ({
   onCheckUpdates,
   isCheckingUpdates,
   checkProgress,
+  isDiscreetMode = false,
+  onToggleDiscreet,
 }) => {
   return (
-    <header className="sticky top-0 z-30 bg-[#090D16]/90 backdrop-blur-md border-b border-[#1F2E45] px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-30 bg-[#090D16]/95 backdrop-blur-md border-b border-[#1F2E45] px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] sm:px-6">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
         {/* Brand / Title */}
         <div className="flex items-center gap-2.5">
@@ -90,6 +94,35 @@ export const Header: React.FC<HeaderProps> = ({
                   ? `ตรวจ ${checkProgress.current}/${checkProgress.total}`
                   : "ตรวจหาตอนใหม่"}
               </span>
+            </button>
+          )}
+
+          {/* Discreet 18+ Blur Toggle Button */}
+          {onToggleDiscreet && (
+            <button
+              onClick={onToggleDiscreet}
+              title={
+                isDiscreetMode
+                  ? "โหมดเซฟตี้ 18+ (เปิดเบลอปกอยู่) - คลิกเพื่อปิด"
+                  : "โหมดเซฟตี้ 18+ (ปิดอยู่) - คลิกเพื่อเปิดเบลอปก Dojin/NTR เมื่ออยู่นอกบ้าน"
+              }
+              className={`flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition shadow-sm active:scale-95 ${
+                isDiscreetMode
+                  ? "bg-rose-950/60 text-rose-300 border border-rose-500/60 shadow-rose-950/50"
+                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+              }`}
+            >
+              {isDiscreetMode ? (
+                <>
+                  <EyeOff className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span className="hidden lg:inline text-[11px] text-rose-300">เบลอ 18+ [ON]</span>
+                </>
+              ) : (
+                <>
+                  <Eye className="w-4 h-4 text-gray-400 shrink-0" />
+                  <span className="hidden lg:inline text-[11px]">เบลอ 18+</span>
+                </>
+              )}
             </button>
           )}
 

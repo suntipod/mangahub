@@ -8,6 +8,7 @@ import {
   upsertManga,
   upsertMangas,
   incrementChapter,
+  setChapter,
   removeManga,
   syncWithSupabase,
   syncWithServer,
@@ -61,11 +62,15 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "title" | "chapter">("recent");
   const [viewMode, setViewMode] = useState<"poster" | "compact">("poster");
+  const [isDiscreetMode, setIsDiscreetMode] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedMode = localStorage.getItem("mangahub_view_mode") as "poster" | "compact";
       if (savedMode) setViewMode(savedMode);
+
+      const savedDiscreet = localStorage.getItem("mangahub_discreet_mode");
+      if (savedDiscreet === "true") setIsDiscreetMode(true);
     }
   }, []);
 
@@ -74,6 +79,16 @@ export default function Home() {
     if (typeof window !== "undefined") {
       localStorage.setItem("mangahub_view_mode", mode);
     }
+  };
+
+  const handleToggleDiscreet = () => {
+    setIsDiscreetMode((prev) => {
+      const nextVal = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("mangahub_discreet_mode", String(nextVal));
+      }
+      return nextVal;
+    });
   };
 
   // Modals state
@@ -226,6 +241,12 @@ export default function Home() {
     setMangas(updated);
   };
 
+  // Quick Sync to latest available chapter
+  const handleSyncToLatest = async (id: string, latestChapter: number) => {
+    const updated = await setChapter(id, latestChapter);
+    setMangas(updated);
+  };
+
   // Delete manga
   const handleDeleteManga = async (id: string) => {
     const updated = await removeManga(id);
@@ -317,6 +338,8 @@ export default function Home() {
         onCheckUpdates={handleCheckAllUpdates}
         isCheckingUpdates={isCheckingUpdates}
         checkProgress={checkProgress}
+        isDiscreetMode={isDiscreetMode}
+        onToggleDiscreet={handleToggleDiscreet}
       />
 
       {/* Main Container */}
@@ -550,8 +573,10 @@ export default function Home() {
                 key={manga.id}
                 manga={manga}
                 viewMode={viewMode}
+                isDiscreetMode={isDiscreetMode}
                 onSelect={(m) => setSelectedManga(m)}
                 onIncrement={handleIncrementChapter}
+                onSyncToLatest={handleSyncToLatest}
               />
             ))}
           </div>

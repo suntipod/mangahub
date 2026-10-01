@@ -18,6 +18,8 @@ import {
   RefreshCw,
   Image as ImageIcon,
   Search,
+  ClipboardPaste,
+  Zap,
 } from "lucide-react";
 import { computeNextChapterUrl, checkMangaOnlineUpdate } from "@/lib/storage";
 import { getStoredCategories } from "@/lib/categories";
@@ -415,6 +417,20 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 <Plus className="w-5 h-5 font-bold" />
               </button>
             </div>
+
+            {/* Quick Button to Jump to Latest Available Chapter */}
+            {latestChapter !== undefined && latestChapter > currentChapter && (
+              <button
+                type="button"
+                onClick={() => handleChapterChange(latestChapter)}
+                className="w-full mt-3 flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 hover:from-amber-500/30 border border-orange-500/40 rounded-xl text-xs font-bold text-orange-300 hover:text-white transition active:scale-98 shadow-sm"
+              >
+                <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
+                <span>
+                  อ่านทันตอนล่าสุดแล้ว: ข้ามไปตอนที่ {latestChapter} ทันที ({latestChapter - currentChapter} ตอน)
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Latest Available Chapter from Web & Online Checker */}
@@ -559,8 +575,27 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
             {/* Add Source Form */}
             {showAddSource && (
               <div className="bg-[#0B0F19] border border-[#1F2E45] rounded-xl p-3 space-y-2 mt-2">
-                <div className="text-xs font-semibold text-gray-300">
-                  เพิ่มลิงก์เว็บอ่านเรื่องนี้:
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-300">
+                    เพิ่มลิงก์เว็บอ่านเรื่องนี้:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const text = await navigator.clipboard.readText();
+                        if (text) {
+                          const match = text.match(/(https?:\/\/[^\s]+)/i);
+                          setNewSourceUrl(match ? match[1] : text.trim());
+                        }
+                      } catch {}
+                    }}
+                    className="text-[11px] font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1 bg-violet-600/20 hover:bg-violet-600/30 px-2 py-0.5 rounded-lg border border-violet-500/30 transition active:scale-95"
+                    title="วางลิงก์จากคลิปบอร์ดทันที"
+                  >
+                    <ClipboardPaste className="w-3 h-3" />
+                    <span>วางจากคลิปบอร์ด</span>
+                  </button>
                 </div>
                 <div className="flex gap-2">
                   <input

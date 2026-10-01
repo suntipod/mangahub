@@ -2,23 +2,35 @@
 
 import React, { useState } from "react";
 import { Manga } from "@/types/manga";
-import { ExternalLink, Plus, Globe, Check, Flame } from "lucide-react";
+import { ExternalLink, Plus, Globe, Check, Flame, Zap, EyeOff } from "lucide-react";
 
 interface MangaCardProps {
   manga: Manga;
   onSelect: (manga: Manga) => void;
   onIncrement: (id: string) => void;
+  onSyncToLatest?: (id: string, latestChapter: number) => void;
   viewMode?: "poster" | "compact";
+  isDiscreetMode?: boolean;
 }
 
 export const MangaCard: React.FC<MangaCardProps> = ({
   manga,
   onSelect,
   onIncrement,
+  onSyncToLatest,
   viewMode = "poster",
+  isDiscreetMode = false,
 }) => {
   const [justIncremented, setJustIncremented] = useState(false);
   const [imgError, setImgError] = useState(false);
+
+  const is18Plus = Boolean(
+    manga.category &&
+      (manga.category.toLowerCase().includes("dojin") ||
+        manga.category.toLowerCase().includes("โดจิน") ||
+        manga.category.toLowerCase().includes("ntr"))
+  );
+  const shouldBlur = Boolean(isDiscreetMode && is18Plus);
 
   const primarySource =
     manga.sources.find((s) => s.is_primary) || manga.sources[0];
@@ -61,7 +73,11 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             src={manga.cover_url}
             alt={manga.title}
             onError={() => setImgError(true)}
-            className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
+            className={`absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-all duration-500 ${
+              shouldBlur
+                ? "filter blur-xl brightness-50 contrast-125 scale-110 group-hover:blur-none group-hover:brightness-100 group-hover:scale-105"
+                : ""
+            }`}
             loading="lazy"
           />
         ) : (
@@ -69,6 +85,21 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             <Globe className="w-10 h-10 mb-2 opacity-30 text-violet-400" />
             <span className="text-xs line-clamp-3 font-semibold text-gray-400">
               {manga.title}
+            </span>
+          </div>
+        )}
+
+        {/* Discreet Blur Overlay Badge */}
+        {shouldBlur && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center p-3 text-center bg-black/40 backdrop-blur-sm pointer-events-none group-hover:opacity-0 transition-opacity duration-300">
+            <div className="w-9 h-9 rounded-full bg-rose-600/90 text-white flex items-center justify-center shadow-lg shadow-rose-600/40 mb-1">
+              <EyeOff className="w-4 h-4" />
+            </div>
+            <span className="text-[10px] font-black text-rose-300 drop-shadow">
+              🔞 ซ่อนปก 18+
+            </span>
+            <span className="text-[9px] text-gray-300 opacity-80">
+              (ชี้/แตะเพื่อดู)
             </span>
           </div>
         )}
@@ -144,6 +175,21 @@ export const MangaCard: React.FC<MangaCardProps> = ({
               </span>
             </button>
 
+            {/* Quick Sync to Latest Chapter Button */}
+            {hasNewChapter && onSyncToLatest && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSyncToLatest(manga.id, manga.latest_available_chapter!);
+                }}
+                className="flex items-center justify-center gap-0.5 py-1.5 px-2 rounded-xl text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 text-white shadow shadow-orange-500/30 transition active:scale-90 shrink-0"
+                title={`อ่านถึงตอนล่าสุดแล้ว: ข้ามไปตอนที่ ${manga.latest_available_chapter} ทันที`}
+              >
+                <Zap className="w-3 h-3 fill-current text-yellow-200" />
+                <span>ช.{manga.latest_available_chapter}</span>
+              </button>
+            )}
+
             <button
               onClick={handleIncrement}
               className={`flex items-center justify-center p-1.5 rounded-xl text-xs font-bold transition active:scale-90 ${
@@ -180,7 +226,11 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             src={manga.cover_url}
             alt={manga.title}
             onError={() => setImgError(true)}
-            className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+            className={`w-full h-full object-cover object-center group-hover:scale-105 transition-all duration-300 ${
+              shouldBlur
+                ? "filter blur-xl brightness-50 contrast-125 scale-110 group-hover:blur-none group-hover:brightness-100 group-hover:scale-105"
+                : ""
+            }`}
             loading="lazy"
           />
         ) : (
@@ -188,6 +238,18 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             <Globe className="w-10 h-10 mb-2 opacity-40 text-violet-400" />
             <span className="text-xs line-clamp-3 font-medium text-gray-400">
               {manga.title}
+            </span>
+          </div>
+        )}
+
+        {/* Discreet Blur Overlay Badge */}
+        {shouldBlur && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center p-2 text-center bg-black/40 backdrop-blur-sm pointer-events-none group-hover:opacity-0 transition-opacity duration-300">
+            <div className="w-8 h-8 rounded-full bg-rose-600/90 text-white flex items-center justify-center shadow-lg shadow-rose-600/40 mb-1">
+              <EyeOff className="w-4 h-4" />
+            </div>
+            <span className="text-[10px] font-black text-rose-300 drop-shadow">
+              🔞 ซ่อนปก 18+
             </span>
           </div>
         )}
@@ -284,6 +346,21 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                 : "อ่านต่อ"}
             </span>
           </button>
+
+          {/* Quick Sync to Latest Chapter Button */}
+          {hasNewChapter && onSyncToLatest && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSyncToLatest(manga.id, manga.latest_available_chapter!);
+              }}
+              className="flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 text-white shadow shadow-orange-500/30 transition active:scale-90 shrink-0"
+              title={`อ่านถึงตอนล่าสุดแล้ว: ข้ามไปตอนที่ ${manga.latest_available_chapter} ทันที`}
+            >
+              <Zap className="w-3.5 h-3.5 fill-current text-yellow-200" />
+              <span>ช.{manga.latest_available_chapter}</span>
+            </button>
+          )}
 
           <button
             onClick={handleIncrement}
