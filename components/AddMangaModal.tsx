@@ -14,6 +14,9 @@ import {
   Link2,
   CheckCircle2,
   ArrowRight,
+  BookOpen,
+  Trash2,
+  Edit3,
 } from "lucide-react";
 
 interface AddMangaModalProps {
@@ -21,6 +24,59 @@ interface AddMangaModalProps {
   onClose: () => void;
   onAddManga: (newManga: Manga) => void;
   onAddMangas?: (newMangas: Manga[]) => void;
+}
+
+interface BatchItem {
+  id: string;
+  url: string;
+  chapter: number;
+  siteName: string;
+}
+
+function parseLinesToBatchItems(text: string): BatchItem[] {
+  const lines = text.split(/[\r\n]+/);
+  const items: BatchItem[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const urlMatch = line.match(/(https?:\/\/[^\s,]+)/i);
+    if (!urlMatch) continue;
+    const itemUrl = urlMatch[1];
+    if (seen.has(itemUrl)) continue;
+    seen.add(itemUrl);
+
+    // 1. Check if user typed explicit chapter after URL on the same line (e.g. "https://... 155")
+    const rest = line.replace(itemUrl, "").trim();
+    const explicitMatch = rest.match(/(?:ตอนที่|ตอน|ch|chapter)?\s*[:=,-]?\s*(\d+(?:\.\d+)?)/i);
+
+    // 2. Or auto-extract chapter from URL (e.g. /chapter/155, /155)
+    const urlChMatch =
+      itemUrl.match(/(?:chapter|ch|ep|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
+      itemUrl.match(/\/(\d+(?:\.\d+)?)\/?$/);
+
+    let chapter = 1;
+    if (explicitMatch) {
+      chapter = parseFloat(explicitMatch[1]);
+    } else if (urlChMatch) {
+      chapter = parseFloat(urlChMatch[1]);
+    }
+
+    let siteName = "เว็บอ่าน";
+    try {
+      const u = new URL(itemUrl);
+      siteName = u.hostname.replace(/^www\./, "").split(".")[0];
+    } catch {}
+
+    items.push({
+      id: `item-${i}-${Date.now()}`,
+      url: itemUrl,
+      chapter,
+      siteName,
+    });
+  }
+  return items;
 }
 
 export const AddMangaModal: React.FC<AddMangaModalProps> = ({
@@ -31,8 +87,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // Active Tab: "single" (1 tab) or "batch" (multiple tabs)
-  const [activeTab, setActiveTab] = useState<"single" | "batch">("batch");
+  // Active Tab: "batch" (default) or "single"
+  const [activeTab, setActiveTab] = useState<"batch" | "single">("batch");
 
   // --- Single Tab State ---
   const [url, setUrl] = useState("");
@@ -48,6 +104,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 
   // --- Batch Tabs State ---
   const [batchText, setBatchText] = useState("");
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, percent: 0 });
   const [batchResults, setBatchResults] = useState<
@@ -55,6 +112,27 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   >([]);
   const [batchFinished, setBatchFinished] = useState(false);
   const [batchError, setBatchError] = useState("");
+
+  // Handle batch text input change
+  const handleBatchTextChange = (text: string) => {
+    setBatchText(text);
+    setBatchItems(parseLinesToBatchItems(text));
+    if (batchError) setBatchError("");
+  };
+
+  // Update chapter for a specific batch item
+  const handleItemChapterChange = (index: number, newChapter: number) => {
+    setBatchItems((prev) => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], chapter: isNaN(newChapter) ? 1 : newChapter };
+      return copy;
+    });
+  };
+
+  // Remove a specific batch item
+  const handleRemoveItem = (index: number) => {
+    setBatchItems((prev) => prev.filter((_, idx) => idx !== index));
+  };
 
   // Auto-scrape single URL
   const handleScrape = async () => {
@@ -156,16 +234,9 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
     }
   };
 
-  // Detect count of valid URLs in batch text
-  const detectedUrls = React.useMemo(() => {
-    const urlRegex = /(https?:\/\/[^\s]+)/gi;
-    const matches = batchText.match(urlRegex) || [];
-    return Array.from(new Set(matches.map((u) => u.trim())));
-  }, [batchText]);
-
   // Execute Batch Import
   const handleStartBatch = async () => {
-    if (detectedUrls.length === 0) {
+    if (batchItems.length === 0) {
       setBatchError("ไม่พบลิงก์ URL ในข้อความ กรุณาก๊อปปี้ลิงก์หน้าการ์ตูนมาวางครับ");
       return;
     }
@@ -174,24 +245,24 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
     setBatchError("");
     setBatchFinished(false);
     setBatchResults([]);
-    setBatchProgress({ current: 0, total: detectedUrls.length, percent: 0 });
+    setBatchProgress({ current: 0, total: batchItems.length, percent: 0 });
 
     const rescuedMangas: Manga[] = [];
     const results: Array<{ url: string; title: string; chapter: number; coverUrl: string; status: "success" | "fallback" }> = [];
 
-    for (let i = 0; i < detectedUrls.length; i++) {
-      const itemUrl = detectedUrls[i];
+    for (let i = 0; i < batchItems.length; i++) {
+      const item = batchItems[i];
       let scrapedTitle = "";
       let scrapedCover = "";
-      let scrapedChapter = 1;
-      let scrapedSite = "เว็บอ่าน";
+      let chosenChapter = item.chapter; // Use user-specified or auto-parsed chapter!
+      let scrapedSite = item.siteName || "เว็บอ่าน";
       let status: "success" | "fallback" = "fallback";
 
       try {
         const res = await fetch("/api/scrape", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: itemUrl }),
+          body: JSON.stringify({ url: item.url }),
         });
 
         if (res.ok) {
@@ -199,8 +270,10 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
           if (json.success && json.data) {
             scrapedTitle = json.data.title || "";
             scrapedCover = json.data.cover_url || "";
-            scrapedChapter = json.data.current_chapter || 1;
-            scrapedSite = json.data.site_name || "เว็บอ่าน";
+            if (item.chapter === 1 && json.data.current_chapter && json.data.current_chapter > 1) {
+              chosenChapter = json.data.current_chapter;
+            }
+            if (json.data.site_name) scrapedSite = json.data.site_name;
             if (scrapedTitle) status = "success";
           }
         }
@@ -211,18 +284,15 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       // Safe fallback if scraper couldn't extract title
       if (!scrapedTitle) {
         try {
-          const parsed = new URL(itemUrl);
-          scrapedSite = parsed.hostname.replace(/^www\./, "").split(".")[0];
+          const parsed = new URL(item.url);
           const segments = parsed.pathname.split("/").filter(Boolean);
-          const chMatch = itemUrl.match(/(?:chapter|ch|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i);
-          if (chMatch) scrapedChapter = parseFloat(chMatch[1]);
           const slug =
             segments.find((s) => !/^\d+$/.test(s) && !/chapter|ep|read|manga/i.test(s)) ||
             segments[0] ||
-            `การ์ตูนแท็บที่ ${i + 1}`;
+            `การ์ตูนเรื่องที่ ${i + 1}`;
           scrapedTitle = decodeURIComponent(slug).replace(/[-_]+/g, " ");
         } catch {
-          scrapedTitle = `การ์ตูนแท็บที่ ${i + 1}`;
+          scrapedTitle = `การ์ตูนเรื่องที่ ${i + 1}`;
         }
       }
 
@@ -233,7 +303,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         id: mangaId,
         title: scrapedTitle,
         cover_url: scrapedCover,
-        current_chapter: scrapedChapter,
+        current_chapter: chosenChapter,
         status: "reading",
         tier: "none",
         sources: [
@@ -241,8 +311,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
             id: sourceId,
             manga_id: mangaId,
             site_name: scrapedSite,
-            base_url: itemUrl,
-            current_chapter_url: itemUrl,
+            base_url: item.url,
+            current_chapter_url: item.url,
             is_primary: true,
             is_active: true,
           },
@@ -254,20 +324,19 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 
       rescuedMangas.push(newManga);
       results.push({
-        url: itemUrl,
+        url: item.url,
         title: scrapedTitle,
-        chapter: scrapedChapter,
+        chapter: chosenChapter,
         coverUrl: scrapedCover,
         status,
       });
 
-      // Update progress UI
       setBatchResults([...results]);
       const current = i + 1;
       setBatchProgress({
         current,
-        total: detectedUrls.length,
-        percent: Math.round((current / detectedUrls.length) * 100),
+        total: batchItems.length,
+        percent: Math.round((current / batchItems.length) * 100),
       });
     }
 
@@ -350,12 +419,12 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
               <div className="bg-gradient-to-r from-violet-950/40 to-indigo-950/30 border border-violet-500/30 rounded-2xl p-3.5 space-y-1.5">
                 <div className="flex items-center gap-2 text-violet-300 text-xs font-bold">
                   <Sparkles className="w-4 h-4 text-violet-400 shrink-0" />
-                  <span>วิธีคัดลอกทุกลิงก์จาก Safari ใน 1 วินาที:</span>
+                  <span>วิธีใส่ตอนที่อ่านถึง &amp; คัดลอกทุกลิงก์จาก Safari:</span>
                 </div>
                 <p className="text-[11px] text-gray-300 leading-relaxed">
-                  ใน Safari กดปุ่มดูแท็บทั้งหมด (สี่เหลี่ยมซ้อนกัน) ➔{" "}
-                  <strong className="text-white">แตะค้างที่แถบจำนวนแท็บด้านล่าง</strong> (เช่น &quot;15 แท็บ&quot;) ➔
-                  เลือก <strong className="text-amber-300">&quot;คัดลอกลิงก์&quot; (Copy Links)</strong> แล้วนำมาวางลงในช่องด้านล่างนี้ได้เลยครับ!
+                  • <strong>ตรวจจับตอนอัตโนมัติ:</strong> ถ้าลิงก์ที่ก๊อปปี้มาเป็นหน้าตอนที่กำลังอ่านอยู่ (เช่น <code className="text-violet-300 font-mono">/155</code>) ระบบจะดึงเลขตอนให้อัตโนมัติ<br />
+                  • <strong>หรือระบุเลขตอนเอง:</strong> เคาะวรรคแล้วพิมพ์เลขตอนต่อท้ายลิงก์ได้เลย เช่น <code className="text-amber-300 font-mono">https://.../manga 155</code><br />
+                  • <strong>แก้ไขเลขตอน:</strong> คุณสามารถพิมพ์แก้เลขตอนของแต่ละเรื่องในรายการด้านล่างได้ทันทีก่อนกดบันทึกครับ!
                 </p>
               </div>
 
@@ -367,18 +436,18 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                         <span>วางลิงก์ทั้งหมดที่ก๊อปปี้มาที่นี่</span>
                         <span className="text-red-400">*</span>
                       </label>
-                      {detectedUrls.length > 0 && (
+                      {batchItems.length > 0 && (
                         <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-                          ตรวจพบ {detectedUrls.length} ลิงก์
+                          ตรวจพบ {batchItems.length} เรื่อง
                         </span>
                       )}
                     </div>
                     <textarea
-                      rows={5}
+                      rows={4}
                       disabled={isBatchRunning}
-                      placeholder={`https://www.up-manga.com/manga/nano-machine/118\nhttps://www.slow-manga.com/manga/pick-me-up/206\nhttps://www.up-manga.com/manga/barbarian/155\n... (วางทุกลิงก์ที่นี่ ระบบจะแยกแต่ละเรื่องให้อัตโนมัติ)`}
+                      placeholder={`https://www.up-manga.com/manga/barbarian/155\nhttps://www.slow-manga.com/manga/pick-me-up 206\nhttps://www.up-manga.com/manga/nano-machine (ระบบดึงเลขตอนจาก URL หรือใส่เลขต่อท้ายได้)`}
                       value={batchText}
-                      onChange={(e) => setBatchText(e.target.value)}
+                      onChange={(e) => handleBatchTextChange(e.target.value)}
                       className="w-full bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-2xl p-3.5 text-xs text-gray-200 placeholder-gray-500 outline-none transition font-mono leading-relaxed"
                     />
                   </div>
@@ -387,6 +456,62 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                     <div className="flex items-center gap-2 p-3 bg-red-950/40 border border-red-500/30 rounded-xl text-xs text-red-300">
                       <AlertCircle className="w-4 h-4 shrink-0" />
                       <span>{batchError}</span>
+                    </div>
+                  )}
+
+                  {/* Detected Items with Editable Chapters */}
+                  {batchItems.length > 0 && !isBatchRunning && (
+                    <div className="space-y-2 bg-[#141E33] border border-[#1F2E45] rounded-2xl p-3.5">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                          <Edit3 className="w-3.5 h-3.5 text-violet-400" />
+                          <span>ตรวจสอบ &amp; ปรับแก้ตอนที่อ่านถึง ({batchItems.length} เรื่อง):</span>
+                        </h4>
+                        <span className="text-[10px] text-gray-400">คลิกที่ช่องเลขตอนเพื่อแก้ได้</span>
+                      </div>
+
+                      <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                        {batchItems.map((item, idx) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-3 p-2 bg-[#0E1524] border border-[#1F2E45] rounded-xl text-xs hover:border-violet-500/40 transition"
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="text-[10px] font-bold text-gray-400 w-4 shrink-0">
+                                #{idx + 1}
+                              </span>
+                              <span className="text-[10px] bg-violet-600/20 text-violet-300 px-1.5 py-0.5 rounded border border-violet-500/30 shrink-0 font-medium">
+                                {item.siteName}
+                              </span>
+                              <span className="text-gray-300 font-mono text-[11px] truncate flex-1" title={item.url}>
+                                {item.url}
+                              </span>
+                            </div>
+
+                            {/* Editable Chapter Input */}
+                            <div className="flex items-center gap-1.5 shrink-0 bg-[#141E33] border border-[#1F2E45] px-2 py-1 rounded-lg">
+                              <span className="text-[10px] font-bold text-gray-400">ตอนที่:</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={item.chapter}
+                                onChange={(e) => handleItemChapterChange(idx, parseFloat(e.target.value))}
+                                className="w-16 bg-[#0B0F19] text-violet-300 font-bold text-xs text-center border border-[#1F2E45] focus:border-violet-500 rounded px-1.5 py-0.5 outline-none"
+                              />
+                            </div>
+
+                            {/* Remove button */}
+                            <button
+                              onClick={() => handleRemoveItem(idx)}
+                              title="ลบลิงก์นี้ออก"
+                              className="p-1 text-gray-500 hover:text-red-400 transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -431,7 +556,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-white truncate">{r.title}</p>
-                            <p className="text-[10px] text-gray-400 truncate">ตอนที่ {r.chapter}</p>
+                            <p className="text-[10px] text-violet-400 font-bold truncate">ตอนที่อ่านถึง: {r.chapter}</p>
                           </div>
                           <span className="text-emerald-400 shrink-0 flex items-center gap-1 font-semibold text-[11px]">
                             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -453,7 +578,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                       🎉 กู้ชีพแท็บสำเร็จทั้งหมด {batchResults.length} เรื่องแล้ว!
                     </h3>
                     <p className="text-xs text-gray-300 mt-1 max-w-md mx-auto">
-                      ข้อมูลทั้งหมดถูกบันทึกและซิงค์ขึ้น Supabase Cloud เรียบร้อยแล้ว ตอนนี้คุณสามารถ
+                      ข้อมูลทั้งหมดรวมถึงตอนล่าสุดถูกบันทึกและซิงค์ขึ้น Supabase Cloud เรียบร้อยแล้ว ตอนนี้คุณสามารถ
                       <strong className="text-emerald-300"> ปิดแท็บทั้งหมดใน Safari ทิ้งได้เลย </strong>
                       ไม่ต้องกลัวหายอีกต่อไปครับ!
                     </p>
@@ -464,6 +589,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                       onClick={() => {
                         setBatchFinished(false);
                         setBatchText("");
+                        setBatchItems([]);
                         setBatchResults([]);
                       }}
                       className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-[#131B2E] border border-[#1F2E45] transition"
@@ -651,7 +777,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
             !batchFinished && (
               <button
                 onClick={handleStartBatch}
-                disabled={isBatchRunning || detectedUrls.length === 0}
+                disabled={isBatchRunning || batchItems.length === 0}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-40 shadow-lg shadow-violet-600/30 transition active:scale-95"
               >
                 {isBatchRunning ? (
@@ -663,8 +789,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                   <>
                     <Sparkles className="w-4 h-4" />
                     <span>
-                      {detectedUrls.length > 0
-                        ? `เริ่มกู้ชีพทั้ง ${detectedUrls.length} แท็บทันที`
+                      {batchItems.length > 0
+                        ? `เริ่มกู้ชีพทั้ง ${batchItems.length} แท็บทันที`
                         : "เริ่มกู้ชีพแท็บทั้งหมด"}
                     </span>
                   </>
