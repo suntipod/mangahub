@@ -2,18 +2,20 @@
 
 import React, { useState } from "react";
 import { Manga } from "@/types/manga";
-import { ExternalLink, Plus, Globe, Check } from "lucide-react";
+import { ExternalLink, Plus, Globe, Check, Flame } from "lucide-react";
 
 interface MangaCardProps {
   manga: Manga;
   onSelect: (manga: Manga) => void;
   onIncrement: (id: string) => void;
+  viewMode?: "poster" | "compact";
 }
 
 export const MangaCard: React.FC<MangaCardProps> = ({
   manga,
   onSelect,
   onIncrement,
+  viewMode = "poster",
 }) => {
   const [justIncremented, setJustIncremented] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -21,6 +23,10 @@ export const MangaCard: React.FC<MangaCardProps> = ({
   const primarySource =
     manga.sources.find((s) => s.is_primary) || manga.sources[0];
   const otherSourcesCount = Math.max(0, manga.sources.length - 1);
+  const hasNewChapter = Boolean(
+    manga.latest_available_chapter &&
+      manga.latest_available_chapter > manga.current_chapter
+  );
 
   const handleIncrement = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -40,6 +46,128 @@ export const MangaCard: React.FC<MangaCardProps> = ({
     }
   };
 
+  // ==========================================
+  // 1. POSTER VIEW (ตรงตามรูปภาพตัวอย่างเป๊ะๆ)
+  // ==========================================
+  if (viewMode === "poster") {
+    return (
+      <div
+        onClick={() => onSelect(manga)}
+        className="group relative aspect-[2/3] w-full bg-[#111827] border border-[#1F2E45]/80 hover:border-violet-500/80 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-2xl hover:shadow-violet-950/40 select-none flex flex-col justify-end"
+      >
+        {/* Full-Bleed Cover Image */}
+        {manga.cover_url && !imgError ? (
+          <img
+            src={manga.cover_url}
+            alt={manga.title}
+            onError={() => setImgError(true)}
+            className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
+            loading="lazy"
+          />
+        ) : (
+          <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center p-4 text-center bg-gradient-to-br from-[#141E33] to-[#0A0E17]">
+            <Globe className="w-10 h-10 mb-2 opacity-30 text-violet-400" />
+            <span className="text-xs line-clamp-3 font-semibold text-gray-400">
+              {manga.title}
+            </span>
+          </div>
+        )}
+
+        {/* Top Badges (Chapter in top-left like Tachiyomi screenshot) */}
+        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-none z-10">
+          {/* Chapter badge */}
+          {hasNewChapter ? (
+            <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[11px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse">
+              <Flame className="w-3 h-3" />
+              <span>ช.{manga.latest_available_chapter}</span>
+            </span>
+          ) : (
+            <span className="bg-indigo-600/90 backdrop-blur-md text-white text-xs font-black px-2 py-0.5 rounded-lg shadow-md border border-indigo-400/30">
+              {manga.current_chapter}
+            </span>
+          )}
+
+          {/* Right badges: Category & Tier */}
+          <div className="flex items-center gap-1">
+            {manga.category && (
+              <span
+                className={`backdrop-blur-md text-[10px] font-extrabold px-1.5 py-0.5 rounded-md shadow ${
+                  manga.category.toLowerCase().includes("dojin")
+                    ? "bg-rose-600/90 text-white"
+                    : manga.category.toLowerCase().includes("ntr")
+                    ? "bg-purple-600/90 text-white"
+                    : "bg-black/60 text-gray-200 border border-white/10"
+                }`}
+              >
+                {manga.category.toLowerCase().includes("dojin")
+                  ? "🔞"
+                  : manga.category.toLowerCase().includes("ntr")
+                  ? "💔"
+                  : "📚"}
+              </span>
+            )}
+            {manga.tier && manga.tier !== "none" && (
+              <span className="bg-amber-500/90 backdrop-blur-md text-black font-extrabold text-[10px] px-1.5 py-0.5 rounded-md shadow">
+                {manga.tier}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom Dark Gradient & Title (ตรงกับรูปตัวอย่าง) */}
+        <div className="relative z-10 pt-16 pb-3 px-3 bg-gradient-to-t from-black via-black/85 to-transparent flex flex-col justify-end">
+          <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-tight drop-shadow-md group-hover:text-violet-200 transition-colors">
+            {manga.title}
+          </h3>
+          {manga.alt_title && (
+            <p className="text-[10px] text-gray-300 line-clamp-1 mt-0.5 opacity-90 drop-shadow">
+              {manga.alt_title}
+            </p>
+          )}
+
+          {/* Quick Action Overlay (อ่านต่อ & +1) */}
+          <div className="mt-2 pt-2 border-t border-white/10 flex items-center gap-1.5">
+            <button
+              onClick={handleOpenReader}
+              className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition active:scale-95 shadow ${
+                hasNewChapter
+                  ? "bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white shadow-orange-500/30"
+                  : "bg-violet-600/80 hover:bg-violet-600 text-white backdrop-blur-sm"
+              }`}
+              title="เปิดอ่านทันที"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span>
+                {hasNewChapter
+                  ? `อ่าน ช.${manga.current_chapter + 1}`
+                  : "อ่านต่อ"}
+              </span>
+            </button>
+
+            <button
+              onClick={handleIncrement}
+              className={`flex items-center justify-center p-1.5 rounded-xl text-xs font-bold transition active:scale-90 ${
+                justIncremented
+                  ? "bg-emerald-600 text-white shadow"
+                  : "bg-white/10 hover:bg-violet-600 text-white border border-white/20 backdrop-blur-sm"
+              }`}
+              title="อ่านจบตอนนี้แล้ว กดบวก 1 ตอน"
+            >
+              {justIncremented ? (
+                <Check className="w-3.5 h-3.5 animate-bounce" />
+              ) : (
+                <Plus className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 2. COMPACT VIEW (โหมดการ์ดแบบแยกกล่อง)
+  // ==========================================
   return (
     <div
       onClick={() => onSelect(manga)}
@@ -66,9 +194,8 @@ export const MangaCard: React.FC<MangaCardProps> = ({
 
         {/* Top Badges */}
         <div className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-none">
-          {/* Chapter & Update Badges */}
           <div className="flex flex-col gap-1 items-start shrink-0">
-            {manga.latest_available_chapter && manga.latest_available_chapter > manga.current_chapter ? (
+            {hasNewChapter ? (
               <>
                 <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse">
                   🔥 ตอนใหม่! ช.{manga.latest_available_chapter}
@@ -85,7 +212,6 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Category Badge */}
             {manga.category && (
               <span
                 className={`backdrop-blur-md text-[10px] font-extrabold px-2 py-0.5 rounded-md shadow ${
@@ -103,8 +229,6 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                   : manga.category}
               </span>
             )}
-
-            {/* Tier or Status */}
             {manga.tier && manga.tier !== "none" && (
               <span className="bg-amber-500/90 backdrop-blur-md text-black font-extrabold text-[11px] px-2 py-0.5 rounded-md shadow">
                 Tier {manga.tier}
@@ -142,27 +266,25 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           )}
         </div>
 
-        {/* Action Buttons: 1-Tap Read & +1 Chapter */}
+        {/* Action Buttons */}
         <div className="mt-3 pt-2.5 border-t border-[#1F2E45]/60 flex items-center gap-2">
-          {/* 1-Tap Read Button */}
           <button
             onClick={handleOpenReader}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold transition active:scale-95 ${
-              manga.latest_available_chapter && manga.latest_available_chapter > manga.current_chapter
-                ? "bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white font-bold shadow-md shadow-orange-500/30"
+              hasNewChapter
+                ? "bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold shadow-md shadow-orange-500/30"
                 : "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30 hover:border-violet-500"
             }`}
             title="เปิดอ่านตอนปัจจุบันทันที"
           >
             <ExternalLink className="w-3.5 h-3.5" />
             <span>
-              {manga.latest_available_chapter && manga.latest_available_chapter > manga.current_chapter
+              {hasNewChapter
                 ? `อ่านต่อ (ช.${manga.current_chapter + 1})`
                 : "อ่านต่อ"}
             </span>
           </button>
 
-          {/* +1 Quick Increment Button */}
           <button
             onClick={handleIncrement}
             className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-90 ${

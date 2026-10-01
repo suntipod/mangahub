@@ -141,6 +141,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If cover is missing, attempt quick auto-enrich from AniList
+    if (!coverUrl && title) {
+      try {
+        const aniRes = await fetch("https://graphql.anilist.co", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: `query ($search: String) { Media(search: $search, type: MANGA) { coverImage { extraLarge large } } }`,
+            variables: { search: title },
+          }),
+        });
+        if (aniRes.ok) {
+          const aniData = await aniRes.json();
+          coverUrl =
+            aniData?.data?.Media?.coverImage?.extraLarge ||
+            aniData?.data?.Media?.coverImage?.large ||
+            "";
+        }
+      } catch {}
+    }
+
     return NextResponse.json({
       success: true,
       data: {

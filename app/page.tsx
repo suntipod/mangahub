@@ -36,6 +36,8 @@ import {
   CheckCircle2,
   Flame,
   Check,
+  LayoutGrid,
+  StretchHorizontal,
 } from "lucide-react";
 
 export default function Home() {
@@ -58,6 +60,21 @@ export default function Home() {
   const [currentTab, setCurrentTab] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "title" | "chapter">("recent");
+  const [viewMode, setViewMode] = useState<"poster" | "compact">("poster");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedMode = localStorage.getItem("mangahub_view_mode") as "poster" | "compact";
+      if (savedMode) setViewMode(savedMode);
+    }
+  }, []);
+
+  const handleToggleViewMode = (mode: "poster" | "compact") => {
+    setViewMode(mode);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("mangahub_view_mode", mode);
+    }
+  };
 
   // Modals state
   const [selectedManga, setSelectedManga] = useState<Manga | null>(null);
@@ -479,20 +496,48 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Sort Selector */}
+            {/* View Mode & Sort Selector Toolbar */}
             <div className="flex items-center gap-2 self-end sm:self-auto">
-              <span className="text-xs text-gray-400 flex items-center gap-1">
-                <ArrowUpDown className="w-3.5 h-3.5" /> เรียงตาม:
-              </span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                className="bg-[#131B2E] border border-[#1F2E45] rounded-xl px-2.5 py-1.5 text-xs text-gray-200 outline-none"
-              >
-                <option value="recent">อ่านล่าสุด</option>
-                <option value="title">ชื่อเรื่อง (ก-ฮ / A-Z)</option>
-                <option value="chapter">เลขตอนมากสุด</option>
-              </select>
+              {/* View Mode Toggle Buttons */}
+              <div className="flex items-center bg-[#131B2E] border border-[#1F2E45] rounded-xl p-0.5">
+                <button
+                  onClick={() => handleToggleViewMode("poster")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                    viewMode === "poster"
+                      ? "bg-violet-600 text-white shadow-sm font-bold"
+                      : "text-gray-400 hover:text-gray-200"
+                  }`}
+                  title="โหมดโปสเตอร์เน้นรูปปกสวยงาม (แบบในตัวอย่าง)"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">โปสเตอร์</span>
+                </button>
+                <button
+                  onClick={() => handleToggleViewMode("compact")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                    viewMode === "compact"
+                      ? "bg-violet-600 text-white shadow-sm font-bold"
+                      : "text-gray-400 hover:text-gray-200"
+                  }`}
+                  title="โหมดการ์ดมาตรฐาน"
+                >
+                  <StretchHorizontal className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">การ์ด</span>
+                </button>
+              </div>
+
+              {/* Sort Selector */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="bg-[#131B2E] border border-[#1F2E45] rounded-xl px-2.5 py-1.5 text-xs text-gray-200 outline-none"
+                >
+                  <option value="recent">อ่านล่าสุด</option>
+                  <option value="title">ชื่อเรื่อง (ก-ฮ / A-Z)</option>
+                  <option value="chapter">เลขตอนมากสุด</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -504,6 +549,7 @@ export default function Home() {
               <MangaCard
                 key={manga.id}
                 manga={manga}
+                viewMode={viewMode}
                 onSelect={(m) => setSelectedManga(m)}
                 onIncrement={handleIncrementChapter}
               />

@@ -16,6 +16,8 @@ import {
   Flame,
   Loader2,
   RefreshCw,
+  Image as ImageIcon,
+  Search,
 } from "lucide-react";
 import { computeNextChapterUrl, checkMangaOnlineUpdate } from "@/lib/storage";
 import { getStoredCategories } from "@/lib/categories";
@@ -46,6 +48,17 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [newSourceName, setNewSourceName] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // Cover image states
+  const [coverUrl, setCoverUrl] = useState(manga.cover_url || "");
+  const [searchCoverQuery, setSearchCoverQuery] = useState(manga.title);
+  const [isSearchingCover, setIsSearchingCover] = useState(false);
+  const [coverResults, setCoverResults] = useState<
+    Array<{ title: string; coverUrl: string; source: string }>
+  >([]);
+  const [showCoverSearch, setShowCoverSearch] = useState(false);
+
+  // Chapter update states
   const [latestChapter, setLatestChapter] = useState<number | undefined>(
     manga.latest_available_chapter
   );
@@ -54,6 +67,24 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
     text: string;
     isNew: boolean;
   } | null>(null);
+
+  // Search official covers from AniList & MangaDex
+  const handleSearchCovers = async () => {
+    const q = searchCoverQuery.trim() || manga.title;
+    if (!q) return;
+    setIsSearchingCover(true);
+    try {
+      const res = await fetch(`/api/cover-search?title=${encodeURIComponent(q)}`);
+      const json = await res.json();
+      if (json.success && json.results) {
+        setCoverResults(json.results);
+      }
+    } catch (err) {
+      console.error("Cover search failed:", err);
+    } finally {
+      setIsSearchingCover(false);
+    }
+  };
 
   // Check online for newer chapters
   const handleCheckOnline = async () => {
@@ -105,7 +136,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
         derivedName = u.hostname.replace(/^www\./, "").split(".")[0];
         derivedName = derivedName.charAt(0).toUpperCase() + derivedName.slice(1);
       } catch {
-        derivedName = "สำรอง";
+        derivedName = "เว็บอ่านสำรอง";
       }
     }
 
@@ -144,6 +175,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const handleSave = () => {
     const updated: Manga = {
       ...manga,
+      cover_url: coverUrl.trim(),
       current_chapter: currentChapter,
       latest_available_chapter: latestChapter,
       status,
@@ -182,10 +214,10 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
           {/* Top Info Banner */}
           <div className="flex gap-4 items-start">
-            <div className="w-24 sm:w-28 aspect-[3/4] rounded-2xl overflow-hidden bg-[#0A0E17] border border-[#1F2E45] shrink-0 shadow-lg">
-              {manga.cover_url ? (
+            <div className="w-24 sm:w-28 aspect-[3/4] rounded-2xl overflow-hidden bg-[#0A0E17] border border-[#1F2E45] shrink-0 shadow-lg relative group">
+              {coverUrl ? (
                 <img
-                  src={manga.cover_url}
+                  src={coverUrl}
                   alt={manga.title}
                   className="w-full h-full object-cover"
                 />
@@ -204,7 +236,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 <p className="text-xs text-gray-400 mt-0.5">{manga.alt_title}</p>
               )}
 
-              {/* Status and Tier Selectors */}
+              {/* Status, Tier & Category Selectors */}
               <div className="mt-3 flex flex-wrap gap-2 items-center">
                 <select
                   value={status}
@@ -246,8 +278,112 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                   ))}
                 </select>
               </div>
+
+              {/* Toggle Cover Search Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextState = !showCoverSearch;
+                  setShowCoverSearch(nextState);
+                  if (nextState && coverResults.length === 0) {
+                    handleSearchCovers();
+                  }
+                }}
+                className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-violet-300 hover:text-white bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/30 px-3 py-1.5 rounded-xl transition"
+              >
+                <ImageIcon className="w-3.5 h-3.5 text-violet-400" />
+                <span>{showCoverSearch ? "ซ่อนเมนูค้นหาปก" : "🖼️ ค้นหารูปปกสวยๆ HD"}</span>
+              </button>
             </div>
           </div>
+
+          {/* Cover Search Box (AniList + MangaDex) */}
+          {showCoverSearch && (
+            <div className="bg-[#141E33] border border-violet-500/40 rounded-2xl p-4 space-y-3 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-violet-400" />
+                    <span>ค้นหารูปปกสวยๆ จาก AniList & MangaDex</span>
+                  </h4>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    แตะที่รูปเพื่อเปลี่ยนรูปปกของการ์ตูนเรื่องนี้ทันที
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={searchCoverQuery}
+                  onChange={(e) => setSearchCoverQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearchCovers()}
+                  placeholder="พิมพ์ชื่อเรื่องภาษาอังกฤษหรือเกาหลี..."
+                  className="flex-1 bg-[#0B0F19] border border-[#1F2E45] rounded-xl px-3 py-2 text-xs text-gray-200 outline-none focus:border-violet-500 placeholder-gray-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleSearchCovers}
+                  disabled={isSearchingCover}
+                  className="bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md shadow-violet-600/30 disabled:opacity-50"
+                >
+                  {isSearchingCover ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Search className="w-3.5 h-3.5" />
+                  )}
+                  <span>ค้นหา</span>
+                </button>
+              </div>
+
+              {/* Cover Candidates Grid */}
+              {coverResults.length > 0 ? (
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 pt-1">
+                  {coverResults.map((r, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => setCoverUrl(r.coverUrl)}
+                      className={`group/cover relative aspect-[2/3] rounded-xl overflow-hidden border cursor-pointer transition active:scale-95 shadow ${
+                        coverUrl === r.coverUrl
+                          ? "border-emerald-500 ring-2 ring-emerald-500/60"
+                          : "border-[#1F2E45] hover:border-violet-400"
+                      }`}
+                    >
+                      <img
+                        src={r.coverUrl}
+                        alt={r.title}
+                        className="w-full h-full object-cover group-hover/cover:scale-105 transition duration-300"
+                      />
+                      {coverUrl === r.coverUrl && (
+                        <div className="absolute inset-0 bg-emerald-950/60 flex items-center justify-center">
+                          <Check className="w-6 h-6 text-emerald-400 drop-shadow-md" />
+                        </div>
+                      )}
+                      <span className="absolute bottom-1 left-1 right-1 text-[9px] bg-black/85 text-gray-200 px-1 py-0.5 rounded text-center truncate">
+                        {r.source}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : isSearchingCover ? (
+                <div className="py-6 text-center text-xs text-gray-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+                  <span>กำลังค้นหาภาพปกความละเอียดสูง...</span>
+                </div>
+              ) : null}
+
+              {/* Custom Direct URL Input */}
+              <div className="pt-1">
+                <input
+                  type="text"
+                  value={coverUrl}
+                  onChange={(e) => setCoverUrl(e.target.value)}
+                  placeholder="หรือวางลิงก์รูปภาพโดยตรง (https://...)"
+                  className="w-full bg-[#0B0F19] border border-[#1F2E45] rounded-xl px-3 py-1.5 text-xs text-gray-300 outline-none font-mono placeholder-gray-600"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Chapter Quick Counter */}
           <div className="bg-[#141E33] border border-[#1F2E45] rounded-2xl p-4">
@@ -367,90 +503,50 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
               </button>
             </div>
 
-            {/* Add Source Input Box */}
-            {showAddSource && (
-              <div className="bg-[#0D1322] border border-[#233554] rounded-xl p-3 space-y-2.5 animate-fade-in">
-                <input
-                  type="text"
-                  placeholder="วาง URL หน้าเรื่อง หรือหน้าตอนจากเว็บสำรอง..."
-                  value={newSourceUrl}
-                  onChange={(e) => setNewSourceUrl(e.target.value)}
-                  className="w-full bg-[#162032] border border-[#1F2E45] rounded-lg px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-violet-500"
-                />
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="ชื่อเว็บ (เช่น Slow-Manga หรือปล่อยว่างให้ออโต้)"
-                    value={newSourceName}
-                    onChange={(e) => setNewSourceName(e.target.value)}
-                    className="flex-1 bg-[#162032] border border-[#1F2E45] rounded-lg px-3 py-1.5 text-xs text-gray-200 outline-none"
-                  />
-                  <button
-                    onClick={handleAddSource}
-                    className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition"
-                  >
-                    บันทึกเว็บนี้
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* List of Sources */}
+            {/* Source List */}
             <div className="space-y-2">
-              {sources.map((src) => (
+              {sources.map((s) => (
                 <div
-                  key={src.id}
-                  className={`flex items-center justify-between gap-3 p-3 rounded-xl border transition ${
-                    src.is_primary
+                  key={s.id}
+                  className={`flex items-center justify-between p-3 rounded-xl border transition ${
+                    s.is_primary
                       ? "bg-violet-950/20 border-violet-500/40"
-                      : "bg-[#0E1524] border-[#1F2E45]"
+                      : "bg-[#0F1626] border-[#1F2E45]"
                   }`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-200">
-                        {src.site_name}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-sm font-semibold text-gray-200">
+                      {s.site_name}
+                    </span>
+                    {s.is_primary ? (
+                      <span className="text-[10px] bg-violet-600/30 text-violet-300 px-2 py-0.5 rounded-full font-bold border border-violet-500/40">
+                        เว็บหลัก (1-Tap Read)
                       </span>
-                      {src.is_primary && (
-                        <span className="bg-violet-500/20 text-violet-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-violet-500/30">
-                          เว็บหลัก
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-gray-400 truncate mt-0.5">
-                      {src.current_chapter_url || src.base_url}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Open Reader Link */}
-                    <a
-                      href={src.current_chapter_url || src.base_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 bg-violet-600/30 hover:bg-violet-600 text-violet-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold transition"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>อ่านตอนนี้</span>
-                    </a>
-
-                    {/* Set Primary Button */}
-                    {!src.is_primary && (
+                    ) : (
                       <button
-                        onClick={() => handleSetPrimary(src.id)}
-                        title="ตั้งเป็นเว็บหลัก"
-                        className="p-1.5 rounded-lg bg-[#182338] hover:bg-violet-600/20 text-gray-400 hover:text-amber-300 transition"
+                        onClick={() => handleSetPrimary(s.id)}
+                        className="text-[10px] text-gray-400 hover:text-violet-300 underline"
                       >
-                        <Star className="w-3.5 h-3.5" />
+                        ตั้งเป็นเว็บหลัก
                       </button>
                     )}
+                  </div>
 
-                    {/* Delete Source Button */}
+                  <div className="flex items-center gap-1.5">
+                    <a
+                      href={s.current_chapter_url || s.base_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-lg bg-[#182338] hover:bg-violet-600 text-gray-300 hover:text-white transition"
+                      title="ทดสอบเปิดอ่านเว็บนี้"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
                     {sources.length > 1 && (
                       <button
-                        onClick={() => handleRemoveSource(src.id)}
+                        onClick={() => handleRemoveSource(s.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-950/40 text-gray-400 hover:text-red-400 transition"
                         title="ลบเว็บนี้"
-                        className="p-1.5 rounded-lg bg-[#182338] hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -459,56 +555,87 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 </div>
               ))}
             </div>
+
+            {/* Add Source Form */}
+            {showAddSource && (
+              <div className="bg-[#0B0F19] border border-[#1F2E45] rounded-xl p-3 space-y-2 mt-2">
+                <div className="text-xs font-semibold text-gray-300">
+                  เพิ่มลิงก์เว็บอ่านเรื่องนี้:
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="URL เว็บอ่าน (เช่น https://...)"
+                    value={newSourceUrl}
+                    onChange={(e) => setNewSourceUrl(e.target.value)}
+                    className="flex-1 bg-[#131B2E] border border-[#1F2E45] rounded-lg px-2.5 py-1.5 text-xs text-gray-200 outline-none focus:border-violet-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="ชื่อเว็บ (ไม่บังคับ)"
+                    value={newSourceName}
+                    onChange={(e) => setNewSourceName(e.target.value)}
+                    className="w-28 bg-[#131B2E] border border-[#1F2E45] rounded-lg px-2.5 py-1.5 text-xs text-gray-200 outline-none focus:border-violet-500"
+                  />
+                  <button
+                    onClick={handleAddSource}
+                    className="bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition"
+                  >
+                    เพิ่ม
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Notes */}
-          <div>
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-1.5">
-              บันทึกช่วยจำ (ความรู้สึก / บันทึกย่อ)
+          {/* Notes Section */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              บันทึกช่วยจำ (Notes)
             </label>
             <textarea
-              rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="เช่น พระเอกกำลังประลองยุทธ์รอบชิง, ค้างไว้ที่ตอนฝึกวิชา..."
-              className="w-full bg-[#131B2E] border border-[#1F2E45] rounded-xl p-3 text-xs text-gray-200 outline-none focus:border-violet-500 resize-none"
+              placeholder="บันทึกช่วยจำ เช่น สนุกมาก, พระเอกเทพ, รอดองให้จบซีซั่น..."
+              rows={2}
+              className="w-full bg-[#141E33] border border-[#1F2E45] rounded-xl p-3 text-xs text-gray-200 outline-none focus:border-violet-500 resize-none"
             />
           </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-t border-[#1F2E45] bg-[#0E1524]">
+        <div className="flex items-center justify-between px-5 py-4 border-t border-[#1F2E45] bg-[#0E1524]">
           <button
             onClick={() => {
-              if (confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบเรื่อง "${manga.title}" ออกจากชั้นหนังสือ?`)) {
+              if (confirm(`คุณต้องการลบ "${manga.title}" ออกจากชั้นหนังสือใช่หรือไม่?`)) {
                 onDelete(manga.id);
                 onClose();
               }
             }}
-            className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 px-3 py-2 rounded-xl hover:bg-red-950/20 transition"
+            className="flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:text-red-300 py-1.5 px-2 rounded-lg transition hover:bg-red-950/30"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-3.5 h-3.5" />
             <span>ลบเรื่องนี้</span>
           </button>
 
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-400 hover:text-white hover:bg-[#1A263D] transition"
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-400 hover:text-white transition"
             >
               ยกเลิก
             </button>
             <button
               onClick={handleSave}
-              className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-bold text-white bg-violet-600 hover:bg-violet-500 shadow-md shadow-violet-600/30 transition active:scale-95"
+              className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-violet-600 hover:bg-violet-500 shadow-md shadow-violet-600/30 transition active:scale-95"
             >
               {savedSuccess ? (
                 <>
-                  <Check className="w-4 h-4" />
+                  <Check className="w-4 h-4 text-emerald-300" />
                   <span>บันทึกแล้ว!</span>
                 </>
               ) : (
-                <span>บันทึกการแก้ไข</span>
+                <span>บันทึกการเปลี่ยนแปลง</span>
               )}
             </button>
           </div>
