@@ -6,6 +6,7 @@ import {
   getLocalMangas,
   saveLocalMangas,
   upsertManga,
+  upsertMangas,
   incrementChapter,
   removeManga,
   syncWithSupabase,
@@ -128,6 +129,12 @@ export default function Home() {
   // Add new manga
   const handleAddManga = async (newManga: Manga) => {
     const updated = await upsertManga(newManga);
+    setMangas(updated);
+  };
+
+  // Batch add multiple new mangas
+  const handleAddMangas = async (newMangas: Manga[]) => {
+    const updated = await upsertMangas(newMangas);
     setMangas(updated);
   };
 
@@ -370,6 +377,7 @@ export default function Home() {
         isOpen={isAddOpen}
         onClose={() => setIsAddOpen(false)}
         onAddManga={handleAddManga}
+        onAddMangas={handleAddMangas}
       />
 
       <SettingsModal

@@ -181,6 +181,55 @@ export async function upsertManga(manga: Manga): Promise<Manga[]> {
   return newList;
 }
 
+// Batch add or update multiple mangas at once
+export async function upsertMangas(mangasToAdd: Manga[]): Promise<Manga[]> {
+  if (mangasToAdd.length === 0) return getLocalMangas();
+
+  const current = getLocalMangas();
+  const currentMap = new Map<string, Manga>();
+  current.forEach((m) => currentMap.set(m.id, m));
+
+  const now = new Date().toISOString();
+  mangasToAdd.forEach((m) => {
+    currentMap.set(m.id, {
+      ...m,
+      updated_at: now,
+    });
+  });
+
+  const newList = Array.from(currentMap.values());
+  saveLocalMangas(newList);
+
+  // Push batch to server API
+  try {
+    const res = await fetch("/api/mangas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(mangasToAdd),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) {
+        saveLocalMangas(json.data);
+      }
+    }
+  } catch (err) {
+    console.warn("Could not save batch to server API:", err);
+  }
+
+  // Background sync each to Supabase
+  const client = getSupabaseClient();
+  if (client) {
+    for (const m of mangasToAdd) {
+      syncMangaToRemote(client, m).catch((err) =>
+        console.error("Background batch Supabase sync failed for:", m.title, err)
+      );
+    }
+  }
+
+  return newList;
+}
+
 // Quick increment chapter (+1)
 export async function incrementChapter(id: string): Promise<Manga[]> {
   const current = getLocalMangas();
