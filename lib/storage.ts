@@ -274,3 +274,36 @@ export async function removeManga(id: string): Promise<Manga[]> {
 
   return newList;
 }
+
+// Check updates for a single manga from its online source
+export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChapter: number; hasUpdate: boolean }> {
+  const primarySource = manga.sources.find((s) => s.is_primary) || manga.sources[0];
+  const urlToCheck = primarySource?.base_url || primarySource?.current_chapter_url;
+
+  if (!urlToCheck) {
+    return { latestChapter: manga.current_chapter, hasUpdate: false };
+  }
+
+  try {
+    const res = await fetch("/api/check-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: urlToCheck,
+        currentChapter: manga.current_chapter,
+      }),
+    });
+    if (!res.ok) throw new Error("API check failed");
+    const json = await res.json();
+    if (json.success && typeof json.latestChapter === "number") {
+      return {
+        latestChapter: json.latestChapter,
+        hasUpdate: json.hasUpdate,
+      };
+    }
+  } catch (e) {
+    console.error(`Check update failed for ${manga.title}:`, e);
+  }
+
+  return { latestChapter: manga.current_chapter, hasUpdate: false };
+}

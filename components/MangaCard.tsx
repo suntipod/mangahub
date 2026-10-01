@@ -65,11 +65,24 @@ export const MangaCard: React.FC<MangaCardProps> = ({
         )}
 
         {/* Top Badges */}
-        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-1.5 pointer-events-none">
-          {/* Chapter Badge */}
-          <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-md shrink-0">
-            ตอนที่ {manga.current_chapter}
-          </span>
+        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-none">
+          {/* Chapter & Update Badges */}
+          <div className="flex flex-col gap-1 items-start shrink-0">
+            {manga.latest_available_chapter && manga.latest_available_chapter > manga.current_chapter ? (
+              <>
+                <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse">
+                  🔥 ตอนใหม่! ช.{manga.latest_available_chapter}
+                </span>
+                <span className="bg-black/80 backdrop-blur-md text-gray-300 text-[10px] font-semibold px-2 py-0.5 rounded-md">
+                  อ่านถึง ช.{manga.current_chapter}
+                </span>
+              </>
+            ) : (
+              <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-md shrink-0">
+                ตอนที่ {manga.current_chapter}
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
             {/* Category Badge */}
@@ -134,11 +147,19 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           {/* 1-Tap Read Button */}
           <button
             onClick={handleOpenReader}
-            className="flex-1 flex items-center justify-center gap-1.5 bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30 hover:border-violet-500 py-1.5 px-2.5 rounded-xl text-xs font-semibold transition active:scale-95"
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold transition active:scale-95 ${
+              manga.latest_available_chapter && manga.latest_available_chapter > manga.current_chapter
+                ? "bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white font-bold shadow-md shadow-orange-500/30"
+                : "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30 hover:border-violet-500"
+            }`}
             title="เปิดอ่านตอนปัจจุบันทันที"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            <span>อ่านต่อ</span>
+            <span>
+              {manga.latest_available_chapter && manga.latest_available_chapter > manga.current_chapter
+                ? `อ่านต่อ (ช.${manga.current_chapter + 1})`
+                : "อ่านต่อ"}
+            </span>
           </button>
 
           {/* +1 Quick Increment Button */}

@@ -13,8 +13,11 @@ import {
   Link as LinkIcon,
   Check,
   AlertCircle,
+  Flame,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
-import { computeNextChapterUrl } from "@/lib/storage";
+import { computeNextChapterUrl, checkMangaOnlineUpdate } from "@/lib/storage";
 import { getStoredCategories } from "@/lib/categories";
 
 interface MangaDetailModalProps {
@@ -43,6 +46,42 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [newSourceName, setNewSourceName] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [latestChapter, setLatestChapter] = useState<number | undefined>(
+    manga.latest_available_chapter
+  );
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateCheckMsg, setUpdateCheckMsg] = useState<{
+    text: string;
+    isNew: boolean;
+  } | null>(null);
+
+  // Check online for newer chapters
+  const handleCheckOnline = async () => {
+    setCheckingUpdate(true);
+    setUpdateCheckMsg(null);
+    const result = await checkMangaOnlineUpdate({
+      ...manga,
+      current_chapter: currentChapter,
+      sources,
+    });
+    setCheckingUpdate(false);
+    if (result.latestChapter) {
+      setLatestChapter(result.latestChapter);
+      if (result.hasUpdate) {
+        setUpdateCheckMsg({
+          text: `พบตอนใหม่ในเว็บถึงตอนที่ ${result.latestChapter}! (คุณตามหลังอยู่ ${
+            result.latestChapter - currentChapter
+          } ตอน)`,
+          isNew: true,
+        });
+      } else {
+        setUpdateCheckMsg({
+          text: `คุณอ่านทันตอนล่าสุดในเว็บแล้ว (ตอนที่ ${result.latestChapter})`,
+          isNew: false,
+        });
+      }
+    }
+  };
 
   // Update chapter number and recalculate source URLs
   const handleChapterChange = (newVal: number) => {
@@ -106,6 +145,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
     const updated: Manga = {
       ...manga,
       current_chapter: currentChapter,
+      latest_available_chapter: latestChapter,
       status,
       tier,
       category,
@@ -239,6 +279,71 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 <Plus className="w-5 h-5 font-bold" />
               </button>
             </div>
+          </div>
+
+          {/* Latest Available Chapter from Web & Online Checker */}
+          <div className="bg-[#141E33] border border-[#1F2E45] rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-orange-400" />
+                  <span>ตอนล่าสุดบนเว็บ (Update Status)</span>
+                </label>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  ตรวจสอบว่าเว็บที่ผูกไว้ปล่อยตอนใหม่ออกมาหรือยัง
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCheckOnline}
+                disabled={checkingUpdate}
+                className="flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-md shadow-orange-500/20 transition active:scale-95 disabled:opacity-50"
+              >
+                {checkingUpdate ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                <span>{checkingUpdate ? "กำลังตรวจ..." : "ตรวจหาตอนล่าสุด"}</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 flex items-center justify-between bg-[#0B0F19] border border-[#1F2E45] rounded-xl py-2 px-3">
+                <span className="text-xs text-gray-400">ตอนล่าสุดในเว็บ:</span>
+                <input
+                  type="number"
+                  placeholder="ยังไม่ได้เช็ค"
+                  value={latestChapter ?? ""}
+                  onChange={(e) => setLatestChapter(parseFloat(e.target.value) || undefined)}
+                  className="w-24 bg-transparent text-sm font-bold text-orange-400 text-right outline-none"
+                />
+              </div>
+
+              {latestChapter && latestChapter > currentChapter && (
+                <button
+                  type="button"
+                  onClick={() => handleChapterChange(latestChapter)}
+                  className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 px-3 py-2 rounded-xl text-xs font-bold transition active:scale-95 shrink-0"
+                  title="ปรับเลขตอนที่คุณอ่านให้ทันตอนล่าสุด"
+                >
+                  ⏩ ปรับเป็นตอนล่าสุด
+                </button>
+              )}
+            </div>
+
+            {updateCheckMsg && (
+              <div
+                className={`p-2.5 rounded-xl text-xs font-medium ${
+                  updateCheckMsg.isNew
+                    ? "bg-orange-950/40 border border-orange-500/30 text-orange-300"
+                    : "bg-emerald-950/40 border border-emerald-500/30 text-emerald-300"
+                }`}
+              >
+                {updateCheckMsg.text}
+              </div>
+            )}
           </div>
 
           {/* Multi-Source Hub (แก้ปัญหาเว็บปลิว) */}

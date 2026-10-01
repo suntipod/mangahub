@@ -11,6 +11,7 @@ import {
   removeManga,
   syncWithSupabase,
   syncWithServer,
+  checkMangaOnlineUpdate,
 } from "@/lib/storage";
 import {
   loadSupabaseConfig,
@@ -33,6 +34,8 @@ import {
   BookmarkCheck,
   Clock,
   CheckCircle2,
+  Flame,
+  Check,
 } from "lucide-react";
 
 export default function Home() {
@@ -43,6 +46,11 @@ export default function Home() {
     enabled: false,
   });
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Online Chapter Updates State
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+  const [checkProgress, setCheckProgress] = useState<{ current: number; total: number } | null>(null);
+  const [updateNotification, setUpdateNotification] = useState<string | null>(null);
 
   // Filters & Search
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -131,6 +139,52 @@ export default function Home() {
     setIsSyncing(false);
   };
 
+  // Check online updates for all mangas with linked sources
+  const handleCheckAllUpdates = async () => {
+    if (isCheckingUpdates || mangas.length === 0) return;
+    setIsCheckingUpdates(true);
+    setUpdateNotification(null);
+
+    const candidates = mangas.filter((m) => m.sources && m.sources.length > 0);
+    let newUpdatesFound = 0;
+    let currentList = [...mangas];
+
+    for (let i = 0; i < candidates.length; i++) {
+      setCheckProgress({ current: i + 1, total: candidates.length });
+      const manga = candidates[i];
+      try {
+        const res = await checkMangaOnlineUpdate(manga);
+        if (res.hasUpdate && res.latestChapter > manga.current_chapter) {
+          newUpdatesFound++;
+          const updated: Manga = {
+            ...manga,
+            latest_available_chapter: res.latestChapter,
+            updated_at: new Date().toISOString(),
+          };
+          currentList = await upsertManga(updated);
+          setMangas(currentList);
+        }
+      } catch (err) {
+        console.error("Error checking update for:", manga.title, err);
+      }
+      // Small pause between web requests
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    setIsCheckingUpdates(false);
+    setCheckProgress(null);
+
+    if (newUpdatesFound > 0) {
+      setUpdateNotification(`🎉 ตรวจสอบเรียบร้อย! พบเรื่องที่มีตอนใหม่อัปเดต ${newUpdatesFound} เรื่อง`);
+    } else {
+      setUpdateNotification(`✅ ทุกเรื่องที่คุณติดตามเป็นตอนล่าสุดแล้ว ไม่มีตอนค้างอ่าน`);
+    }
+
+    setTimeout(() => {
+      setUpdateNotification(null);
+    }, 6000);
+  };
+
   // Add new manga
   const handleAddManga = async (newManga: Manga) => {
     const updated = await upsertManga(newManga);
@@ -181,8 +235,13 @@ export default function Home() {
             return false;
           }
         }
-        // Status Tab filter
-        if (currentTab !== "all" && m.status !== currentTab) {
+        // Status / Update Tab filter
+        if (currentTab === "has_update") {
+          const hasUpdate = Boolean(
+            m.latest_available_chapter && m.latest_available_chapter > m.current_chapter
+          );
+          if (!hasUpdate) return false;
+        } else if (currentTab !== "all" && m.status !== currentTab) {
           return false;
         }
         // Search filter
@@ -219,6 +278,10 @@ export default function Home() {
     return mangas.filter((m) => (m.category || "การ์ตูนทั่วไป") === selectedCategory);
   }, [mangas, selectedCategory]);
 
+  const updatesCount = categoryScopedMangas.filter(
+    (m) => m.latest_available_chapter && m.latest_available_chapter > m.current_chapter
+  ).length;
+
   const readingCount = categoryScopedMangas.filter((m) => m.status === "reading").length;
   const onHoldCount = categoryScopedMangas.filter((m) => m.status === "on_hold").length;
   const completedCount = categoryScopedMangas.filter((m) => m.status === "completed").length;
@@ -234,10 +297,28 @@ export default function Home() {
         onOpenAdd={() => setIsAddOpen(true)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        onCheckUpdates={handleCheckAllUpdates}
+        isCheckingUpdates={isCheckingUpdates}
+        checkProgress={checkProgress}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-4 space-y-4">
+        {/* Update Notification Alert Banner */}
+        {updateNotification && (
+          <div className="bg-gradient-to-r from-orange-950/60 to-rose-950/60 border border-orange-500/40 text-orange-200 text-xs px-4 py-3 rounded-2xl flex items-center justify-between shadow-lg animate-fade-in">
+            <span className="font-semibold">{updateNotification}</span>
+            {updatesCount > 0 && currentTab !== "has_update" && (
+              <button
+                onClick={() => setCurrentTab("has_update")}
+                className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-[11px] px-3 py-1 rounded-xl transition shadow"
+              >
+                ดูเรื่องที่มีตอนใหม่ ({updatesCount})
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Safari Tab Rescue Quick Banner */}
         <div className="relative overflow-hidden bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-[#131B2E] border border-violet-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
           <div className="flex items-start sm:items-center gap-3">
@@ -257,13 +338,29 @@ export default function Home() {
             </div>
           </div>
 
-          <button
-            onClick={() => setIsAddOpen(true)}
-            className="flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition active:scale-95 shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>กู้ชีพแท็บ Safari ทันที</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCheckAllUpdates}
+              disabled={isCheckingUpdates}
+              className="flex items-center justify-center gap-1.5 bg-[#182338] hover:bg-[#20304c] text-orange-300 border border-orange-500/30 text-xs font-bold px-3.5 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              title="ตรวจสอบตอนใหม่ล่าสุดจากเว็บทั้งหมด"
+            >
+              <Flame className={`w-4 h-4 ${isCheckingUpdates ? "animate-pulse text-orange-400" : ""}`} />
+              <span>
+                {isCheckingUpdates && checkProgress
+                  ? `ตรวจ ${checkProgress.current}/${checkProgress.total}...`
+                  : "ตรวจหาตอนใหม่"}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setIsAddOpen(true)}
+              className="flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition active:scale-95 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>กู้ชีพแท็บ Safari</span>
+            </button>
+          </div>
         </div>
 
         {/* Category Filter Toolbar */}
@@ -328,6 +425,21 @@ export default function Home() {
                 }`}
               >
                 สถานะทั้งหมด ({categoryScopedMangas.length})
+              </button>
+
+              {/* Has Updates Tab */}
+              <button
+                onClick={() => setCurrentTab("has_update")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                  currentTab === "has_update"
+                    ? "bg-gradient-to-r from-orange-500 to-rose-600 text-white font-bold shadow-md shadow-orange-500/30"
+                    : updatesCount > 0
+                    ? "bg-orange-950/40 text-orange-300 hover:bg-orange-900/50 border border-orange-700/50 animate-pulse font-bold"
+                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5 text-orange-400" />
+                <span>มีตอนใหม่ ({updatesCount})</span>
               </button>
 
               <button
@@ -405,21 +517,38 @@ export default function Home() {
             </div>
             <div>
               <h3 className="text-base font-bold text-white">
-                {searchQuery ? "ไม่พบการ์ตูนที่ค้นหา" : "ยังไม่มีการ์ตูนในหมวดนี้"}
+                {currentTab === "has_update"
+                  ? "ยังไม่มีตอนใหม่ที่รออ่านในขณะนี้"
+                  : searchQuery
+                  ? "ไม่พบการ์ตูนที่ค้นหา"
+                  : "ยังไม่มีการ์ตูนในหมวดนี้"}
               </h3>
               <p className="text-xs text-gray-400 max-w-sm mt-1">
-                {searchQuery
+                {currentTab === "has_update"
+                  ? "คุณอ่านทันทุกตอนแล้ว! กดปุ่ม 'ตรวจหาตอนใหม่' เพื่อสแกนเว็บต้นทางอีกครั้งได้ทุกเมื่อ"
+                  : searchQuery
                   ? `ไม่พบเรื่องที่ตรงกับ "${searchQuery}" ลองค้นหาด้วยคำอื่น หรือกดเพิ่มเรื่องใหม่`
                   : "เริ่มต้นโดยการกดปุ่ม 'กู้ชีพแท็บ' เพื่อวางลิงก์จากแท็บการ์ตูนที่คุณกำลังอ่านอยู่ได้เลย"}
               </p>
             </div>
-            <button
-              onClick={() => setIsAddOpen(true)}
-              className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>เพิ่มการ์ตูนเรื่องแรก</span>
-            </button>
+            {currentTab === "has_update" ? (
+              <button
+                onClick={handleCheckAllUpdates}
+                disabled={isCheckingUpdates}
+                className="flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/30 transition"
+              >
+                <Flame className="w-4 h-4" />
+                <span>ตรวจหาตอนใหม่อีกครั้ง</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsAddOpen(true)}
+                className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>เพิ่มการ์ตูนเรื่องแรก</span>
+              </button>
+            )}
           </div>
         )}
       </main>

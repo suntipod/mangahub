@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Cloud, Wifi } from "lucide-react";
+import { BookOpen, RefreshCw, Settings, Plus, Cloud, Wifi, Flame, Loader2 } from "lucide-react";
 import { SupabaseConfig } from "@/types/manga";
 
 interface HeaderProps {
@@ -12,6 +12,9 @@ interface HeaderProps {
   onOpenAdd: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  onCheckUpdates?: () => void;
+  isCheckingUpdates?: boolean;
+  checkProgress?: { current: number; total: number } | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -22,6 +25,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdd,
   searchQuery,
   onSearchChange,
+  onCheckUpdates,
+  isCheckingUpdates,
+  checkProgress,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-[#090D16]/90 backdrop-blur-md border-b border-[#1F2E45] px-4 py-3 sm:px-6">
@@ -62,6 +68,31 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Check Updates Button */}
+          {onCheckUpdates && (
+            <button
+              onClick={onCheckUpdates}
+              disabled={isCheckingUpdates}
+              title="ตรวจหาตอนใหม่จากเว็บทั้งหมด"
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition shadow-sm ${
+                isCheckingUpdates
+                  ? "bg-orange-500/20 text-orange-400 border border-orange-500/30 cursor-not-allowed"
+                  : "bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white shadow-orange-500/20 active:scale-95"
+              }`}
+            >
+              {isCheckingUpdates ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Flame className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden md:inline">
+                {isCheckingUpdates && checkProgress
+                  ? `ตรวจ ${checkProgress.current}/${checkProgress.total}`
+                  : "ตรวจหาตอนใหม่"}
+              </span>
+            </button>
+          )}
+
           {/* Manual Refresh / Sync Button */}
           <button
             onClick={onSync}
