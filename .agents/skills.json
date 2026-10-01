@@ -1,0 +1,18 @@
+{
+  "entries": [
+    { "path": ".agents/skills/aileron-protocol/skills" },
+    { "path": ".agents/skills/andrej-karpathy-skills/skills" },
+    { "path": ".agents/skills/caveman/skills" },
+    { "path": ".agents/skills/ponytail/skills" },
+    { "path": ".agents/skills/superpowers/skills" },
+    { "path": ".agents/skills/taste-skill/skills" },
+    { "path": ".agents/skills/ui-ux-pro-max-skill/.claude/skills" },
+    { "path": ".agents/skills/impeccable/.gemini/skills" },
+    { "path": ".agents/skills/9arm-skills/skills/engineering" },
+    { "path": ".agents/skills/9arm-skills/skills/productivity" },
+    { "path": ".agents/skills/mattpocock-skills/skills/engineering" },
+    { "path": ".agents/skills/mattpocock-skills/skills/productivity" },
+    { "path": ".agents/skills/mattpocock-skills/skills/misc" },
+    { "path": ".agents/skills/mattpocock-skills/skills/in-progress" }
+  ]
+}
