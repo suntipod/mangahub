@@ -20,7 +20,7 @@ const CHAPTER_CONTAINER_SELECTORS = [
   "div.version-chap",
 ];
 
-// Elements that should never be searched for chapters of the current manga (sidebars, popular lists, recommendations)
+// Elements that should never be searched for chapters of the current manga (sidebars, popular lists, recommendations, ads, comments)
 const EXCLUDED_CONTAINERS = [
   ".sidebar",
   "#sidebar",
@@ -31,7 +31,37 @@ const EXCLUDED_CONTAINERS = [
   "footer",
   "#footer",
   ".quickfilter",
+  ".adds",
+  ".ads",
+  ".ad",
+  ".advertisement",
+  ".advertising",
+  ".sponsor",
+  ".pop-widget",
+  "#comments",
+  ".comments",
+  ".comment-list",
+  "#respond",
+  ".fb-comments",
 ];
+
+// Helper to extract chapter number directly from URL path
+function extractChapterFromUrl(urlString: string): number | undefined {
+  try {
+    const parsed = new URL(urlString);
+    const path = decodeURIComponent(parsed.pathname);
+
+    const match =
+      path.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
+      path.match(/[-_](\d+(?:\.\d+)?)\/?$/) ||
+      path.match(/\/(\d+(?:\.\d+)?)\/?$/);
+    if (match && match[1]) {
+      const num = parseFloat(match[1]);
+      if (!isNaN(num) && num > 0) return num;
+    }
+  } catch {}
+  return undefined;
+}
 
 // Extract clean series slug from URL to filter unrelated links
 function extractSeriesSlug(urlStr: string): string {
@@ -64,10 +94,46 @@ function extractSeriesSlug(urlStr: string): string {
 async function checkReadRealm(urlStr: string): Promise<number | null> {
   try {
     const u = new URL(urlStr);
-    const m = u.pathname.match(/\/comic\/([a-zA-Z0-9_-]+)/);
-    if (!m) return null;
+    let bookId: string | null = null;
+    const isChapter = u.pathname.includes("/chapter/");
 
-    const bookId = m[1];
+    if (isChapter) {
+      const html = await fetchPageHtml(urlStr);
+      if (html) {
+        const m = html.match(/book_ID[\\\"':]+([a-zA-Z0-9_-]{10,40})/i);
+        if (m) bookId = m[1];
+      }
+    } else {
+      const m = u.pathname.match(/\/comic\/([a-zA-Z0-9_-]+)/);
+      if (m && m[1] !== "chapter") {
+        bookId = m[1];
+      }
+    }
+
+    if (!bookId) return null;
+
+    // 1. Primary: getBookHomePage directly gives book_chapter_count accurately
+    try {
+      const homeRes = await fetch(
+        `https://api.readrealm.co/reader/book/getBookHomePage?book_type=comic&book_id=${bookId}`,
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+          },
+          next: { revalidate: 0 },
+        }
+      );
+      if (homeRes.ok) {
+        const json = await homeRes.json();
+        if (json && typeof json.book_chapter_count === "number" && json.book_chapter_count > 0) {
+          return json.book_chapter_count;
+        }
+      }
+    } catch {}
+
+    // 2. Fallback: getListChaptersSectionPage
     const apiUrl = `https://api.readrealm.co/reader/book/getListChaptersSectionPage?book_type=comic&book_id=${bookId}&start_index=1&sort=desc`;
     const res = await fetch(apiUrl, {
       headers: {
@@ -75,6 +141,7 @@ async function checkReadRealm(urlStr: string): Promise<number | null> {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json",
       },
+      next: { revalidate: 0 },
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -159,10 +226,15 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
   const $ = cheerio.load(html);
   const foundChapters = new Set<number>();
 
+  // Strip all ads, popups, sidebars, comments, and unrelated widgets UPFRONT before any scanning
+  EXCLUDED_CONTAINERS.forEach((exSel) => {
+    $(exSel).remove();
+  });
+
   const isReasonable = (num: number): boolean => {
     if (isNaN(num) || num <= 0) return false;
     if (num >= 1990 && num <= 2030 && (currentChapter < 1500 || currentChapter > 2100)) return false;
-    if ((num === 200 || num === 404 || num === 500) && currentChapter < 150) return false;
+    if ((num === 404 || num === 500) && currentChapter < 150) return false;
     if (num > 5000 && currentChapter < 4000) return false;
     return true;
   };
@@ -347,6 +419,15 @@ export async function POST(req: NextRequest) {
       if (seriesHtml) {
         const seriesChapters = extractChaptersFromHtml(seriesHtml, seriesSlug, Number(currentChapter));
         checkedChapters.push(...seriesChapters);
+      }
+    }
+
+    // 4. Fallback: If 0 chapters were detected from HTML (e.g. Cloudflare protection or single-page reader),
+    // extract chapter directly from the URL itself (e.g. ...-ตอนที่-91/ or .../ch-91/)
+    if (checkedChapters.length === 0) {
+      const urlChapter = extractChapterFromUrl(parsedUrl.href);
+      if (urlChapter && urlChapter > 0) {
+        checkedChapters.push(urlChapter);
       }
     }
 

@@ -175,15 +175,16 @@ export async function syncWithServer(): Promise<Manga[]> {
 export function computeNextChapterUrl(url: string, nextChapter: number): string {
   if (!url) return "";
   try {
+    const decodedUrl = decodeURI(url);
     const chapterRegex = /((?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?)(\d+(?:\.\d+)?)/i;
-    if (chapterRegex.test(url)) {
-      return url.replace(chapterRegex, `$1${nextChapter}`);
+    if (chapterRegex.test(decodedUrl)) {
+      return decodedUrl.replace(chapterRegex, `$1${nextChapter}`);
     }
-    const endNumberRegex = /(\/)(\d+(?:\.\d+)?)\/?$/;
-    if (endNumberRegex.test(url)) {
-      return url.replace(endNumberRegex, `$1${nextChapter}`);
+    const endNumberRegex = /([-_/])(\d+(?:\.\d+)?)\/?$/;
+    if (endNumberRegex.test(decodedUrl)) {
+      return decodedUrl.replace(endNumberRegex, `$1${nextChapter}/`);
     }
-    return `${url.replace(/\/$/, "")}/${nextChapter}`;
+    return `${decodedUrl.replace(/\/$/, "")}/${nextChapter}`;
   } catch {
     return url;
   }

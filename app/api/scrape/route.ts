@@ -24,11 +24,12 @@ function getSiteNameFromUrl(urlString: string): string {
 function extractChapterFromUrl(urlString: string): number | undefined {
   try {
     const parsed = new URL(urlString);
-    const path = parsed.pathname;
+    const path = decodeURIComponent(parsed.pathname);
 
-    // Patterns like /chapter-118, /ep-118, /ch-118, /118, /ตอนที่-118
+    // Patterns like /chapter-118, /ep-118, /ch-118, /118, /ตอนที่-118, -91/
     const match =
       path.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
+      path.match(/[-_](\d+(?:\.\d+)?)\/?$/) ||
       path.match(/\/(\d+(?:\.\d+)?)\/?$/);
     if (match && match[1]) {
       const num = parseFloat(match[1]);
