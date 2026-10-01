@@ -70,7 +70,20 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
     let siteName = "เว็บอ่าน";
     try {
       const u = new URL(itemUrl);
+
+      // Filter out non-manga URLs (homepages, top-up, search, self app)
+      if (
+        (u.pathname === "/" || u.pathname === "") ||
+        /^\/(?:topup|search|comics|manga|page\/\d+)\/?$/i.test(u.pathname) ||
+        u.hostname.includes("vercel.app")
+      ) {
+        continue;
+      }
+
       siteName = u.hostname.replace(/^www\./, "").split(".")[0];
+      if (u.hostname.includes("google.") && u.searchParams.has("q")) {
+        siteName = "Google ค้นหา";
+      }
     } catch {}
 
     items.push({
@@ -348,16 +361,28 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         // Fallback gracefully without stopping
       }
 
+      // Clean up title in case any stray slashes or hashes were returned
+      if (scrapedTitle) {
+        scrapedTitle = scrapedTitle.replace(/^[\s/]+/, "").trim();
+      }
+
       // Safe fallback if scraper couldn't extract title
-      if (!scrapedTitle) {
+      if (!scrapedTitle || scrapedTitle.length < 2) {
         try {
           const parsed = new URL(item.url);
           const segments = parsed.pathname.split("/").filter(Boolean);
           const slug =
-            segments.find((s) => !/^\d+$/.test(s) && !/chapter|ep|read|manga/i.test(s)) ||
+            segments.filter(
+              (s) => !/^(?:comic|comics|manga|content|episode|series|book|read|chapter|page|p)$/i.test(s) && !/^\d+$/.test(s)
+            ).pop() ||
             segments[0] ||
             `การ์ตูนเรื่องที่ ${i + 1}`;
-          scrapedTitle = decodeURIComponent(slug).replace(/[-_]+/g, " ");
+          const decoded = decodeURIComponent(slug)
+            .replace(/^\d+[-_]/, "")
+            .replace(/[-_]?(?:chapter|ch|ep|ตอนที่)?[-_]?\d+$/i, "")
+            .replace(/[-_]+/g, " ")
+            .trim();
+          scrapedTitle = decoded || `การ์ตูนเรื่องที่ ${i + 1}`;
         } catch {
           scrapedTitle = `การ์ตูนเรื่องที่ ${i + 1}`;
         }
@@ -406,6 +431,11 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         total: batchItems.length,
         percent: Math.round((current / batchItems.length) * 100),
       });
+
+      // Small pause between web requests to prevent Cloudflare rate-limiting
+      if (i < batchItems.length - 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
     }
 
     // Save all to database & storage
