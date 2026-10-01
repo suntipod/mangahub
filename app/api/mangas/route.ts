@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { Manga } from "@/types/manga";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), "mangahub-data")
+  : path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "mangas.json");
 
 const INITIAL_MANGAS: Manga[] = [
@@ -93,35 +96,33 @@ const INITIAL_MANGAS: Manga[] = [
   },
 ];
 
+let memoryCache: Manga[] = INITIAL_MANGAS;
+
 function readServerData(): Manga[] {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        memoryCache = parsed;
+        return parsed;
+      }
     }
-    if (!fs.existsSync(DATA_FILE)) {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(INITIAL_MANGAS, null, 2), "utf-8");
-      return INITIAL_MANGAS;
-    }
-    const raw = fs.readFileSync(DATA_FILE, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-    return INITIAL_MANGAS;
   } catch (e) {
-    console.error("Error reading server data:", e);
-    return INITIAL_MANGAS;
+    // Ignore read errors on serverless
   }
+  return memoryCache;
 }
 
 function writeServerData(data: Manga[]): void {
+  memoryCache = data;
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (e) {
-    console.error("Error writing server data:", e);
+    // In serverless environments, writing to disk might fail; memory cache persists during instance lifetime
   }
 }
 
