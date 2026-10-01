@@ -35,6 +35,7 @@ interface BatchItem {
   url: string;
   chapter: number;
   siteName: string;
+  userTitle?: string;
 }
 
 function parseLinesToBatchItems(text: string): BatchItem[] {
@@ -45,26 +46,72 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    const urlMatch = line.match(/(https?:\/\/[^\s,]+)/i);
-    if (!urlMatch) continue;
-    const itemUrl = urlMatch[1];
-    if (seen.has(itemUrl)) continue;
+
+    let itemUrl = "";
+    let userTitle = "";
+
+    // 1. Check for Markdown link: [Title text](URL)
+    const mdMatch = line.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
+    if (mdMatch) {
+      userTitle = mdMatch[1].trim();
+      itemUrl = mdMatch[2].trim();
+    } else {
+      // 2. Extract standard URL (stripping trailing punctuation like ')' or ']')
+      const urlMatch = line.match(/(https?:\/\/[^\s,\]\)]+)/i);
+      if (!urlMatch) continue;
+      itemUrl = urlMatch[1].trim();
+
+      // Check if text exists before or after the URL
+      const textOutside = line.replace(itemUrl, "").replace(/[\[\]\(\)]/g, "").trim();
+      if (textOutside.length > 2 && /[^\x00-\x7F\d\s]/.test(textOutside)) {
+        userTitle = textOutside;
+      }
+    }
+
+    if (!itemUrl || seen.has(itemUrl)) continue;
     seen.add(itemUrl);
 
-    // 1. Check if user typed explicit chapter after URL on the same line (e.g. "https://... 155")
-    const rest = line.replace(itemUrl, "").trim();
-    const explicitMatch = rest.match(/(?:ตอนที่|ตอน|ch|chapter)?\s*[:=,-]?\s*(\d+(?:\.\d+)?)/i);
-
-    // 2. Or auto-extract chapter from URL (e.g. /chapter/155, /155)
-    const urlChMatch =
-      itemUrl.match(/(?:chapter|ch|ep|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
-      itemUrl.match(/\/(\d+(?:\.\d+)?)\/?$/);
-
+    // Extract chapter from userTitle or line text if present
     let chapter = 1;
-    if (explicitMatch) {
-      chapter = parseFloat(explicitMatch[1]);
-    } else if (urlChMatch) {
-      chapter = parseFloat(urlChMatch[1]);
+    let chFound = false;
+
+    // A. Check for chapter in title text (e.g. "ตอนที่ 62" or "ตอนที่ 1" or "Chapter 50")
+    if (userTitle) {
+      const chInTitle = userTitle.match(/(?:ตอนที่|ตอน|ch|chapter)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
+      if (chInTitle) {
+        chapter = parseFloat(chInTitle[1]);
+        chFound = true;
+      }
+    }
+
+    // B. Check for chapter after URL if not found in title
+    if (!chFound) {
+      const rest = line.replace(itemUrl, "").replace(userTitle, "").trim();
+      const explicitMatch = rest.match(/(?:ตอนที่|ตอน|ch|chapter)?\s*[:=,-]?\s*(\d+(?:\.\d+)?)/i);
+      if (explicitMatch) {
+        const num = parseFloat(explicitMatch[1]);
+        if (!isNaN(num) && num > 0 && num < 4000) {
+          chapter = num;
+          chFound = true;
+        }
+      }
+    }
+
+    // C. Or auto-extract chapter from URL (e.g. /chapter/155, /155), rejecting internal routing IDs
+    if (!chFound) {
+      const isInternalId = /(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(itemUrl);
+      if (!isInternalId) {
+        const urlChMatch =
+          itemUrl.match(/(?:chapter|ch|ep|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
+          itemUrl.match(/[-_](\d+(?:\.\d+)?)\/?$/) ||
+          itemUrl.match(/\/(\d+(?:\.\d+)?)\/?$/);
+        if (urlChMatch) {
+          const num = parseFloat(urlChMatch[1]);
+          if (!isNaN(num) && num > 0 && num < 4000) {
+            chapter = num;
+          }
+        }
+      }
     }
 
     let siteName = "เว็บอ่าน";
@@ -91,6 +138,7 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
       url: itemUrl,
       chapter,
       siteName,
+      userTitle: userTitle || undefined,
     });
   }
   return items;
@@ -161,7 +209,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   const [pasteBatchSuccess, setPasteBatchSuccess] = useState(false);
 
   // Auto-scrape single URL (supports direct URL parameter from clipboard)
-  const handleScrape = async (overrideUrl?: string) => {
+  const handleScrape = async (overrideUrl?: string, overrideTitle?: string) => {
     const targetUrl = (overrideUrl !== undefined ? overrideUrl : url).trim();
     if (!targetUrl) {
       setErrorMsg("กรุณาวาง URL หน้าเรื่องการ์ตูนก่อนครับ");
@@ -176,7 +224,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       const res = await fetch("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: targetUrl }),
+        body: JSON.stringify({ url: targetUrl, providedTitle: overrideTitle || title }),
       });
 
       const json = await res.json();
@@ -185,7 +233,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       }
 
       const data = json.data;
-      setTitle(data.title || "");
+      setTitle(data.title || overrideTitle || "");
       setCoverUrl(data.cover_url || "");
       if (data.current_chapter) {
         setChapter(data.current_chapter);
@@ -197,6 +245,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       }
     } catch (e: any) {
       setErrorMsg(e.message || "เกิดข้อผิดพลาดในการดึงข้อมูล กรุณากรอกข้อมูลเองด้านล่าง");
+      if (overrideTitle) setTitle(overrideTitle);
       try {
         const u = new URL(targetUrl);
         setSiteName(u.hostname.replace(/^www\./, "").split(".")[0]);
@@ -221,16 +270,39 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         return;
       }
 
-      // Extract URL from clipboard text in case user copied a line with extra text
-      const urlMatch = clipText.match(/(https?:\/\/[^\s]+)/i);
-      const targetUrl = urlMatch ? urlMatch[1] : clipText.trim();
+      let targetUrl = "";
+      let userProvidedTitle = "";
+      let userProvidedChapter: number | null = null;
+
+      const mdMatch = clipText.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
+      if (mdMatch) {
+        userProvidedTitle = mdMatch[1].trim();
+        targetUrl = mdMatch[2].trim();
+      } else {
+        const urlMatch = clipText.match(/(https?:\/\/[^\s,\]\)]+)/i);
+        targetUrl = urlMatch ? urlMatch[1].trim() : clipText.trim();
+        const textOutside = clipText.replace(targetUrl, "").replace(/[\[\]\(\)]/g, "").trim();
+        if (textOutside.length > 2 && /[^\x00-\x7F\d\s]/.test(textOutside)) {
+          userProvidedTitle = textOutside;
+        }
+      }
+
+      if (userProvidedTitle) {
+        const chMatch = userProvidedTitle.match(/(?:ตอนที่|ตอน|ch|chapter)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
+        if (chMatch) {
+          userProvidedChapter = parseFloat(chMatch[1]);
+        }
+      }
 
       setUrl(targetUrl);
+      if (userProvidedTitle) setTitle(userProvidedTitle);
+      if (userProvidedChapter) setChapter(userProvidedChapter);
+
       setPasteSingleSuccess(true);
       setTimeout(() => setPasteSingleSuccess(false), 1500);
 
       // Immediately trigger scrape
-      handleScrape(targetUrl);
+      handleScrape(targetUrl, userProvidedTitle);
     } catch (err: any) {
       console.warn("Clipboard access denied:", err);
       setErrorMsg("ไม่สามารถเข้าถึงคลิปบอร์ดได้ (เบราว์เซอร์อาจต้องกดยืนยันการอนุญาตสิทธิ์ หรือวางด้วยตนเอง)");
@@ -342,7 +414,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         const res = await fetch("/api/scrape", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: item.url }),
+          body: JSON.stringify({ url: item.url, providedTitle: item.userTitle }),
         });
 
         if (res.ok) {
@@ -368,23 +440,35 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 
       // Safe fallback if scraper couldn't extract title
       if (!scrapedTitle || scrapedTitle.length < 2) {
-        try {
-          const parsed = new URL(item.url);
-          const segments = parsed.pathname.split("/").filter(Boolean);
-          const slug =
-            segments.filter(
-              (s) => !/^(?:comic|comics|manga|content|episode|series|book|read|chapter|page|p)$/i.test(s) && !/^\d+$/.test(s)
-            ).pop() ||
-            segments[0] ||
-            `การ์ตูนเรื่องที่ ${i + 1}`;
-          const decoded = decodeURIComponent(slug)
-            .replace(/^\d+[-_]/, "")
-            .replace(/[-_]?(?:chapter|ch|ep|ตอนที่)?[-_]?\d+$/i, "")
-            .replace(/[-_]+/g, " ")
-            .trim();
-          scrapedTitle = decoded || `การ์ตูนเรื่องที่ ${i + 1}`;
-        } catch {
-          scrapedTitle = `การ์ตูนเรื่องที่ ${i + 1}`;
+        if (item.userTitle && item.userTitle.trim().length > 1) {
+          scrapedTitle = item.userTitle.trim();
+        } else {
+          try {
+            const parsed = new URL(item.url);
+            const segments = parsed.pathname.split("/").filter(Boolean);
+            const slug =
+              segments.filter(
+                (s) =>
+                  !/^(?:comic|comics|manga|content|episode|series|book|books|cartoon|cartoons|read|chapter|page|p|detail|view)$/i.test(
+                    s
+                  ) && !/^\d+$/.test(s)
+              ).pop() ||
+              segments[0] ||
+              `การ์ตูนเรื่องที่ ${i + 1}`;
+            let decoded = decodeURIComponent(slug)
+              .replace(/^\d+[-_]/, "")
+              .replace(/[-_]?(?:chapter|ch|ep|ตอนที่)?[-_]?\d+$/i, "")
+              .replace(/[-_]+/g, " ")
+              .trim();
+
+            if (/^[a-fA-F0-9]{16,64}$/.test(decoded) || /^[a-zA-Z0-9_-]{20,}$/.test(decoded)) {
+              decoded = `การ์ตูนเรื่องที่ ${i + 1}`;
+            }
+
+            scrapedTitle = decoded || `การ์ตูนเรื่องที่ ${i + 1}`;
+          } catch {
+            scrapedTitle = `การ์ตูนเรื่องที่ ${i + 1}`;
+          }
         }
       }
 

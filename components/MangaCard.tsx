@@ -72,6 +72,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           <img
             src={manga.cover_url}
             alt={manga.title}
+            referrerPolicy="no-referrer"
             onError={() => setImgError(true)}
             className={`absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-all duration-500 ${
               shouldBlur
@@ -245,6 +246,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           <img
             src={manga.cover_url}
             alt={manga.title}
+            referrerPolicy="no-referrer"
             onError={() => setImgError(true)}
             className={`w-full h-full object-cover object-center group-hover:scale-105 transition-all duration-300 ${
               shouldBlur

@@ -26,6 +26,11 @@ function extractChapterFromUrl(urlString: string): number | undefined {
     const parsed = new URL(urlString);
     const path = decodeURIComponent(parsed.pathname);
 
+    // If path is like /cartoon/book/714/read/25347, 25347 is an internal chapter ID, NOT chapter number
+    if (/(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(path)) {
+      return undefined;
+    }
+
     // Patterns like /chapter-118, /ep-118, /ch-118, /118, /ตอนที่-118, -91/
     const match =
       path.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
@@ -33,7 +38,13 @@ function extractChapterFromUrl(urlString: string): number | undefined {
       path.match(/\/(\d+(?:\.\d+)?)\/?$/);
     if (match && match[1]) {
       const num = parseFloat(match[1]);
-      if (!isNaN(num) && num > 0) return num;
+      if (!isNaN(num) && num > 0) {
+        // Discard large internal database auto-increment IDs (e.g. /read/25347)
+        if (num > 3000 && /\/read\/\d+$/i.test(path)) {
+          return undefined;
+        }
+        return num;
+      }
     }
   } catch {
     // Ignore error
@@ -54,20 +65,21 @@ function cleanTitle(rawTitle: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'");
 
-  // Remove leading slashes and whitespace
+  // Remove leading slashes, markdown syntax, or numbering
   title = title.replace(/^[\s/]+/, "");
+  title = title.replace(/^\d+\s*(?:เรื่อง|ตอน)\s*[-:–]?\s*/gi, ""); // e.g. "16 เรื่อง ข้าคือจอมวายร้าย..."
 
   // Remove leading "อ่าน...", "อ่านการ์ตูนเรื่อง..."
   title = title.replace(/^(?:อ่านการ์ตูนเรื่อง|อ่านการ์ตูน|อ่านมังงะ|อ่าน)\s*/gi, "");
 
-  // Remove site domain and branding suffixes (e.g. | ReadRealm, - SING-MANGA, | Go)
+  // Remove site domain and branding suffixes (e.g. | ReadRealm, - SING-MANGA, | Go, | Kairew)
   title = title.replace(/\s*[-–|•]\s*[\w\s.-]+(?:com|net|org|xyz|to|in|co|app)\s*$/gi, "");
   title = title.replace(
-    /\s*[-–|•]\s*(?:ReadRealm|SING-MANGA|Up-Manga|Slow-Manga|Dark-Manga|Go-Manga|Ped-Manga|Zen-Manga|Nano-Manga|Murim|MyNovel|Niceoppai).*/gi,
+    /\s*[-–|•]\s*(?:ReadRealm|SING-MANGA|Up-Manga|Slow-Manga|Dark-Manga|Go-Manga|Ped-Manga|Zen-Manga|Nano-Manga|Murim|MyNovel|Niceoppai|ReadToon|Kairew|Pengi|DukeToon|Public Manga).*/gi,
     ""
   );
 
-  // Remove trailing chapter references like "ตอนที่ 182 แปลไทย", "Chapter 40"
+  // Remove trailing chapter references like "ตอนที่ 182 แปลไทย", "Chapter 40", "ตอนที่ 1"
   title = title.replace(
     /\s*(?:[-–|•]\s*)?(?:ตอนที่|ตอน|chapter|ch|ep)\s*[-_]?\d+(?:\.\d+)?(?:\s*(?:แปลไทย|raw|th).*|\s*[-–|•].*)?$/gi,
     ""
@@ -104,7 +116,7 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
     const segments = pathname.split("/").filter(Boolean);
     const meaningfulSegments = segments.filter(
       (s) =>
-        !/^(?:comic|comics|manga|content|episode|series|book|read|chapter|page|p)$/i.test(s) &&
+        !/^(?:comic|comics|manga|content|episode|series|book|books|cartoon|cartoons|read|reader|chapter|page|p|detail|view)$/i.test(s) &&
         !/^\d+$/.test(s)
     );
 
@@ -115,12 +127,11 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
       rawSlug = decodeURIComponent(rawSlug);
     } catch {}
 
-    // Check if it's a random Firestore document hash (e.g. 3E8jmDbO0ejJVZwR5qpa)
+    // Reject hex hashes (e.g. f6d7407c349bfea9ac8c4094febea095) or Firestore document IDs
     if (
-      /^[a-zA-Z0-9_-]{16,}$/.test(rawSlug) &&
-      /[A-Z]/.test(rawSlug) &&
-      /[a-z]/.test(rawSlug) &&
-      /\d/.test(rawSlug)
+      /^[a-fA-F0-9]{16,64}$/.test(rawSlug) ||
+      /^[a-zA-Z0-9_-]{20,}$/.test(rawSlug) ||
+      (/^\d+$/.test(rawSlug))
     ) {
       return { title: "", isJunk: false };
     }
@@ -158,10 +169,65 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
   }
 }
 
+// Function to query AniList for HD cover and English/Romaji title
+async function searchAniListCoverAndTitle(title: string): Promise<{ coverUrl: string; englishTitle?: string }> {
+  if (!title || title.startsWith("การ์ตูนจาก")) return { coverUrl: "" };
+
+  const candidates: string[] = [];
+
+  // Extract English/Romaji substring if title contains non-ASCII and ASCII
+  const romajiMatches = title.match(/[a-zA-Z0-9\s':,-]{4,}/g);
+  if (romajiMatches) {
+    romajiMatches.forEach((rm) => {
+      const c = rm.trim();
+      if (c.length > 3) candidates.push(c);
+    });
+  }
+  candidates.push(title);
+
+  // Add variations (e.g. "Juu Kishi" -> "Juukishi", first 3-4 words)
+  const expanded: string[] = [];
+  for (const c of candidates) {
+    expanded.push(c);
+    if (c.includes("Juu Kishi")) expanded.push(c.replace(/Juu Kishi/g, "Juukishi"));
+    const words = c.split(/\s+/).filter(Boolean);
+    if (words.length >= 3) {
+      expanded.push(words.slice(0, 3).join(" "));
+      expanded.push(words.slice(0, 4).join(" "));
+    }
+  }
+
+  const uniqueCandidates = Array.from(new Set(expanded)).filter((c) => c && c.length >= 3);
+
+  for (const queryStr of uniqueCandidates.slice(0, 4)) {
+    try {
+      const aniRes = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: `query ($search: String) { Media(search: $search, type: MANGA) { title { romaji english native } coverImage { extraLarge large } } }`,
+          variables: { search: queryStr },
+        }),
+        signal: AbortSignal.timeout(3500),
+      });
+      if (aniRes.ok) {
+        const aniData = await aniRes.json();
+        const media = aniData?.data?.Media;
+        const cover = media?.coverImage?.extraLarge || media?.coverImage?.large;
+        if (cover) {
+          const engTitle = media?.title?.english || media?.title?.romaji;
+          return { coverUrl: cover, englishTitle: engTitle };
+        }
+      }
+    } catch {}
+  }
+  return { coverUrl: "" };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { url } = body;
+    const { url, providedTitle } = body;
 
     if (!url || typeof url !== "string") {
       return NextResponse.json(
@@ -183,6 +249,7 @@ export async function POST(req: NextRequest) {
     const siteName = getSiteNameFromUrl(parsedUrl.href);
     const detectedChapter = extractChapterFromUrl(parsedUrl.href);
     const urlDerived = smartDeriveFromUrl(parsedUrl.href);
+    const cleanProvidedTitle = typeof providedTitle === "string" ? cleanTitle(providedTitle) : "";
 
     // If it's a non-manga utility URL (like topup, search, homepage)
     if (urlDerived.isJunk) {
@@ -232,15 +299,24 @@ export async function POST(req: NextRequest) {
           $('img[src*="cover"], img[src*="thumb"]').first().attr("src") ||
           "";
 
+        // ReadToon bug fix: replace localhost:3000 leak with public CDN domain
+        if (coverUrl.includes("localhost:3000")) {
+          if (parsedUrl.hostname.includes("readtoon.com")) {
+            coverUrl = coverUrl.replace(/https?:\/\/localhost:3000/, "https://w.nobuild.pro");
+          } else {
+            coverUrl = "";
+          }
+        }
+
         fetchSuccess = true;
       }
     } catch (fetchErr) {
       // Scrape timed out or blocked (Cloudflare), fallback gracefully
     }
 
-    // Fallback: If title extraction failed or returned empty/junk, use smart URL derivation
+    // Fallback: If title extraction failed or returned empty/junk, use providedTitle or smart URL derivation
     if (!title || title.length < 2) {
-      title = urlDerived.title;
+      title = cleanProvidedTitle || urlDerived.title;
     }
 
     // Final fallback: derive from site name
@@ -257,28 +333,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // If cover is missing and we have a title, auto-enrich from AniList
-    if (!coverUrl && title && !title.startsWith("การ์ตูนจาก")) {
-      try {
-        const aniRes = await fetch("https://graphql.anilist.co", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query: `query ($search: String) { Media(search: $search, type: MANGA) { title { romaji english native } coverImage { extraLarge large } } }`,
-            variables: { search: title },
-          }),
-          signal: AbortSignal.timeout(4000),
-        });
-        if (aniRes.ok) {
-          const aniData = await aniRes.json();
-          const media = aniData?.data?.Media;
-          coverUrl = media?.coverImage?.extraLarge || media?.coverImage?.large || "";
-          // If our current title is just a slug, use AniList English/Romaji title for better readability
-          if (!fetchSuccess && media?.title) {
-            title = media.title.english || media.title.romaji || title;
-          }
-        }
-      } catch {}
+    // If cover is missing or from protected domain, enrich from AniList
+    if (!coverUrl || coverUrl.includes("nobuild.pro") || !fetchSuccess) {
+      const aniResult = await searchAniListCoverAndTitle(title);
+      if (aniResult.coverUrl) {
+        coverUrl = aniResult.coverUrl;
+      }
+      if (!fetchSuccess && aniResult.englishTitle && (!title || title.startsWith("การ์ตูนจาก"))) {
+        title = aniResult.englishTitle;
+      }
     }
 
     return NextResponse.json({

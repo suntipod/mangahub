@@ -228,6 +228,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 <img
                   src={coverUrl}
                   alt={manga.title}
+                  referrerPolicy="no-referrer"
                   className="w-full h-full object-cover"
                 />
               ) : (

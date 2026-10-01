@@ -51,13 +51,24 @@ function extractChapterFromUrl(urlString: string): number | undefined {
     const parsed = new URL(urlString);
     const path = decodeURIComponent(parsed.pathname);
 
+    // If path is like /cartoon/book/714/read/25347, 25347 is an internal chapter ID, NOT chapter number
+    if (/(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(path)) {
+      return undefined;
+    }
+
     const match =
       path.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
       path.match(/[-_](\d+(?:\.\d+)?)\/?$/) ||
       path.match(/\/(\d+(?:\.\d+)?)\/?$/);
     if (match && match[1]) {
       const num = parseFloat(match[1]);
-      if (!isNaN(num) && num > 0) return num;
+      if (!isNaN(num) && num > 0) {
+        // Discard large internal database auto-increment IDs (e.g. /read/25347)
+        if (num > 3000 && /\/read\/\d+$/i.test(path)) {
+          return undefined;
+        }
+        return num;
+      }
     }
   } catch {}
   return undefined;
@@ -308,16 +319,35 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
       }
     }
 
-    const textMatch = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
-    if (textMatch) {
-      const num = parseFloat(textMatch[1]);
-      if (isReasonable(num)) foundChapters.add(num);
-    }
+    const cloned = $(el).clone();
+    cloned.find("span, div, b, small, p").each((_, subEl) => {
+      const subText = $(subEl).text();
+      if (/เหรียญ|บาท|coins?|baht/i.test(subText)) {
+        $(subEl).remove();
+      }
+    });
+    let cleanText = cloned.text().trim().replace(/\d+\s*(?:เหรียญ|coins?|บาท|baht)/gi, "");
 
+    const textMatch = cleanText.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
     const hrefMatch =
       href.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/](\d+(?:\.\d+)?)/i) ||
-      href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
-    if (hrefMatch) {
+      href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/) ||
+      href.match(/\/(\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
+
+    if (hrefMatch && textMatch) {
+      const hNum = parseFloat(hrefMatch[1]);
+      const tNum = parseFloat(textMatch[1]);
+      // If text concatenation caused a spurious extra digit like 1662 from 166 + 2 coins
+      if (tNum.toString().startsWith(hNum.toString()) && tNum > hNum) {
+        if (isReasonable(hNum)) foundChapters.add(hNum);
+      } else {
+        if (isReasonable(tNum)) foundChapters.add(tNum);
+        if (isReasonable(hNum)) foundChapters.add(hNum);
+      }
+    } else if (textMatch) {
+      const num = parseFloat(textMatch[1]);
+      if (isReasonable(num)) foundChapters.add(num);
+    } else if (hrefMatch) {
       const num = parseFloat(hrefMatch[1]);
       if (isReasonable(num)) foundChapters.add(num);
     }
