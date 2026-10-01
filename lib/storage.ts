@@ -387,35 +387,50 @@ export async function removeManga(id: string): Promise<Manga[]> {
   return newList;
 }
 
-// Check updates for a single manga from its online source
+// Check updates for a manga across all its sources (primary + backups)
 export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChapter: number; hasUpdate: boolean }> {
-  const primarySource = manga.sources.find((s) => s.is_primary) || manga.sources[0];
-  const urlToCheck = primarySource?.base_url || primarySource?.current_chapter_url;
-
-  if (!urlToCheck) {
+  if (!manga.sources || manga.sources.length === 0) {
     return { latestChapter: manga.current_chapter, hasUpdate: false };
   }
 
-  try {
-    const res = await fetch("/api/check-update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: urlToCheck,
-        currentChapter: manga.current_chapter,
-      }),
-    });
-    if (!res.ok) throw new Error("API check failed");
-    const json = await res.json();
-    if (json.success && typeof json.latestChapter === "number") {
-      return {
-        latestChapter: json.latestChapter,
-        hasUpdate: json.hasUpdate,
-      };
+  let maxLatest = manga.current_chapter;
+  let foundUpdate = false;
+
+  // Check all active sources to find the absolute highest chapter available across all web sources!
+  const activeSources = manga.sources.filter((s) => s.is_active);
+  const sourcesToCheck = activeSources.length > 0 ? activeSources : manga.sources;
+
+  for (const source of sourcesToCheck) {
+    const urlToCheck = source.current_chapter_url || source.base_url;
+    if (!urlToCheck) continue;
+
+    try {
+      const res = await fetch("/api/check-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: urlToCheck,
+          currentChapter: manga.current_chapter,
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && typeof json.latestChapter === "number") {
+          if (json.latestChapter > maxLatest) {
+            maxLatest = json.latestChapter;
+          }
+          if (json.hasUpdate) {
+            foundUpdate = true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`Check update failed for ${manga.title} on ${source.site_name}:`, e);
     }
-  } catch (e) {
-    console.error(`Check update failed for ${manga.title}:`, e);
   }
 
-  return { latestChapter: manga.current_chapter, hasUpdate: false };
+  return {
+    latestChapter: maxLatest,
+    hasUpdate: maxLatest > manga.current_chapter || foundUpdate,
+  };
 }

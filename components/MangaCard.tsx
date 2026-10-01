@@ -106,17 +106,22 @@ export const MangaCard: React.FC<MangaCardProps> = ({
 
         {/* Top Badges (Chapter in top-left like Tachiyomi screenshot) */}
         <div className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-none z-10">
-          {/* Chapter badge */}
-          {hasNewChapter ? (
-            <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[11px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse">
-              <Flame className="w-3 h-3" />
-              <span>ช.{manga.latest_available_chapter}</span>
-            </span>
-          ) : (
-            <span className="bg-indigo-600/90 backdrop-blur-md text-white text-xs font-black px-2 py-0.5 rounded-lg shadow-md border border-indigo-400/30">
-              {manga.current_chapter}
-            </span>
-          )}
+          {/* Chapter badge: Displays BOTH current chapter read AND latest chapter available */}
+          <div className="flex flex-col gap-0.5 items-start shrink-0">
+            {hasNewChapter ? (
+              <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[11px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse">
+                <Flame className="w-3.5 h-3.5 fill-current" />
+                <span>ช.{manga.current_chapter} / {manga.latest_available_chapter}</span>
+              </span>
+            ) : (
+              <span className="bg-indigo-600/90 backdrop-blur-md text-white text-xs font-black px-2 py-0.5 rounded-lg shadow-md border border-indigo-400/30 flex items-center gap-1">
+                <span>ช.{manga.current_chapter}</span>
+                {manga.latest_available_chapter ? (
+                  <span className="text-[10px] text-indigo-200 opacity-90">/ {manga.latest_available_chapter}</span>
+                ) : null}
+              </span>
+            )}
+          </div>
 
           {/* Right badges: Category & Tier */}
           <div className="flex items-center gap-1">
@@ -147,6 +152,21 @@ export const MangaCard: React.FC<MangaCardProps> = ({
 
         {/* Bottom Dark Gradient & Title (ตรงกับรูปตัวอย่าง) */}
         <div className="relative z-10 pt-16 pb-3 px-3 bg-gradient-to-t from-black via-black/85 to-transparent flex flex-col justify-end">
+          {/* Source & Backup indicator */}
+          {primarySource && (
+            <div className="flex items-center gap-1 mb-1 pointer-events-none">
+              <span className="bg-black/70 backdrop-blur-md text-gray-300 text-[9px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                {primarySource.site_name}
+              </span>
+              {otherSourcesCount > 0 && (
+                <span className="bg-violet-950/80 border border-violet-500/30 text-violet-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                  +{otherSourcesCount} เว็บสำรอง
+                </span>
+              )}
+            </div>
+          )}
+
           <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-tight drop-shadow-md group-hover:text-violet-200 transition-colors">
             {manga.title}
           </h3>
@@ -258,17 +278,16 @@ export const MangaCard: React.FC<MangaCardProps> = ({
         <div className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-none">
           <div className="flex flex-col gap-1 items-start shrink-0">
             {hasNewChapter ? (
-              <>
-                <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse">
-                  🔥 ตอนใหม่! ช.{manga.latest_available_chapter}
-                </span>
-                <span className="bg-black/80 backdrop-blur-md text-gray-300 text-[10px] font-semibold px-2 py-0.5 rounded-md">
-                  อ่านถึง ช.{manga.current_chapter}
-                </span>
-              </>
+              <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[11px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse">
+                <Flame className="w-3.5 h-3.5 fill-current" />
+                <span>ช.{manga.current_chapter} / {manga.latest_available_chapter}</span>
+              </span>
             ) : (
-              <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-md shrink-0">
-                ตอนที่ {manga.current_chapter}
+              <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-md shrink-0 flex items-center gap-1">
+                <span>ตอนที่ {manga.current_chapter}</span>
+                {manga.latest_available_chapter ? (
+                  <span className="text-[10px] text-violet-200 opacity-90">/ {manga.latest_available_chapter}</span>
+                ) : null}
               </span>
             )}
           </div>

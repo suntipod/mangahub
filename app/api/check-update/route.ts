@@ -5,12 +5,18 @@ import * as cheerio from "cheerio";
 function deriveSeriesUrl(urlStr: string): string | null {
   try {
     const u = new URL(urlStr);
-    // Remove chapter pattern at the end: /chapter-118, /118, /ep-118, /ตอนที่-118
-    const cleanPath = u.pathname
-      .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?\/?$/i, "")
-      .replace(/\/\d+(?:\.\d+)?\/?$/, "");
+    let pathname = u.pathname;
+    try {
+      pathname = decodeURIComponent(pathname);
+    } catch {}
 
-    if (cleanPath && cleanPath !== u.pathname && cleanPath !== "/") {
+    // Remove chapter pattern at the end: /chapter-118, /118, /ep-118, /ตอนที่-118, /slug-168
+    const cleanPath = pathname
+      .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?\/?$/i, "")
+      .replace(/\/\d+(?:\.\d+)?\/?$/, "")
+      .replace(/\/(?:[a-z0-9-]+?)[-_](\d+)\/?$/i, "");
+
+    if (cleanPath && cleanPath !== pathname && cleanPath !== "/") {
       return `${u.origin}${cleanPath}`;
     }
   } catch {}
@@ -50,9 +56,10 @@ function extractChaptersFromHtml(html: string, currentChapter: number): number[]
       if (isReasonableChapter(num)) foundChapters.add(num);
     }
 
-    // Match URL path patterns
+    // Match URL path patterns (e.g. /chapter-118, /return-of-the-legend-168/, /14-return-of-the-legend/)
     const hrefMatch =
       href.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/](\d+(?:\.\d+)?)/i) ||
+      href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/) ||
       href.match(/\/(\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
     if (hrefMatch) {
       const num = parseFloat(hrefMatch[1]);
