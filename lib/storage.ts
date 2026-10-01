@@ -393,7 +393,7 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
     return { latestChapter: manga.current_chapter, hasUpdate: false };
   }
 
-  let maxLatest = manga.current_chapter;
+  let maxFoundFromWeb = 0;
   let foundUpdate = false;
 
   // Check all active sources to find the absolute highest chapter available across all web sources!
@@ -416,8 +416,8 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
       if (res.ok) {
         const json = await res.json();
         if (json.success && typeof json.latestChapter === "number") {
-          if (json.latestChapter > maxLatest) {
-            maxLatest = json.latestChapter;
+          if (json.latestChapter > maxFoundFromWeb) {
+            maxFoundFromWeb = json.latestChapter;
           }
           if (json.hasUpdate) {
             foundUpdate = true;
@@ -429,8 +429,10 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
     }
   }
 
+  const latestChapter = maxFoundFromWeb > 0 ? maxFoundFromWeb : (manga.latest_available_chapter || manga.current_chapter);
+
   return {
-    latestChapter: maxLatest,
-    hasUpdate: maxLatest > manga.current_chapter || foundUpdate,
+    latestChapter,
+    hasUpdate: (maxFoundFromWeb > 0 && maxFoundFromWeb > manga.current_chapter) || foundUpdate,
   };
 }

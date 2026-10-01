@@ -1,73 +1,163 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 
-// Helper to derive series root page from a chapter URL
+// Dedicated chapter container selectors across all major manga platforms/themes (WordPress Madara, MangaStream, MangaThemesia, etc.)
+const CHAPTER_CONTAINER_SELECTORS = [
+  "#chapterlist",
+  ".eplister",
+  "#manga-chapters-holder",
+  ".listing-chapters_wrap",
+  ".bxcl",
+  ".clstyle",
+  "ul.sub-chap",
+  "li.wp-manga-chapter",
+  ".chapters-list",
+  "#chapters-list",
+  ".chapter-list",
+  "ul.chapters",
+  ".epcheck",
+  ".listing-chapters",
+  "div.version-chap",
+];
+
+// Elements that should never be searched for chapters of the current manga (sidebars, popular lists, recommendations)
+const EXCLUDED_CONTAINERS = [
+  ".sidebar",
+  "#sidebar",
+  ".widget",
+  ".bsx",
+  ".related",
+  ".popular",
+  "footer",
+  "#footer",
+  ".quickfilter",
+];
+
+// Extract clean series slug from URL to filter unrelated links
+function extractSeriesSlug(urlStr: string): string {
+  try {
+    const u = new URL(urlStr);
+    let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
+
+    pathname = pathname
+      .replace(/[-_](?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+(?:\.\d+)?$/i, "")
+      .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?$/i, "")
+      .replace(/\/\d+(?:\.\d+)?$/, "")
+      .replace(/[-_](\d+)$/, "");
+
+    const segments = pathname.split("/").filter(Boolean);
+    const slug = segments[segments.length - 1] || "";
+    if (slug === "manga" || slug === "series" || slug === "comic") {
+      return segments[segments.length - 2] || "";
+    }
+    return slug.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+// Find link back to series root from reader breadcrumb or "All Chapters"
+function findSeriesUrlFromHtml(html: string, currentUrl: string): string | null {
+  const $ = cheerio.load(html);
+  let seriesUrl: string | null = null;
+
+  try {
+    const currentOrigin = new URL(currentUrl).origin;
+
+    $(".breadcrumb a, .allc a, .ts-breadcrumb a, .c-breadcrumb a, [itemprop='itemListElement'] a, .headpost a, a.allc").each((_, el) => {
+      if (seriesUrl) return;
+      const href = $(el).attr("href");
+      if (!href) return;
+
+      try {
+        const target = new URL(href, currentUrl);
+        if (target.origin !== currentOrigin) return;
+
+        const path = target.pathname.replace(/\/$/, "");
+        if (!path || path === "" || path === "/manga" || path === "/series" || path === "/comics") {
+          return;
+        }
+
+        if (target.href === currentUrl) return;
+
+        if (target.protocol.startsWith("http")) {
+          seriesUrl = target.href;
+        }
+      } catch {}
+    });
+  } catch {}
+
+  return seriesUrl;
+}
+
+// Fallback to derive series root page from a chapter URL path
 function deriveSeriesUrl(urlStr: string): string | null {
   try {
     const u = new URL(urlStr);
-    let pathname = u.pathname;
-    try {
-      pathname = decodeURIComponent(pathname);
-    } catch {}
+    let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
 
-    // Remove chapter pattern at the end: /chapter-118, /118, /ep-118, /ตอนที่-118, /slug-168
     const cleanPath = pathname
-      .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?\/?$/i, "")
-      .replace(/\/\d+(?:\.\d+)?\/?$/, "")
-      .replace(/\/(?:[a-z0-9-]+?)[-_](\d+)\/?$/i, "");
+      .replace(/[-_](?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+(?:\.\d+)?$/i, "")
+      .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?$/i, "")
+      .replace(/\/\d+(?:\.\d+)?$/, "")
+      .replace(/[-_](\d+)$/, "");
 
-    if (cleanPath && cleanPath !== pathname && cleanPath !== "/") {
-      return `${u.origin}${cleanPath}`;
+    if (cleanPath && cleanPath !== pathname && cleanPath !== "") {
+      return `${u.origin}${cleanPath}/`;
     }
   } catch {}
   return null;
 }
 
-// Extract all valid chapter numbers from HTML
-function extractChaptersFromHtml(html: string, currentChapter: number): number[] {
+// Extract chapters strictly belonging to this manga
+function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentChapter: number = 1): number[] {
   const $ = cheerio.load(html);
   const foundChapters = new Set<number>();
 
-  const isReasonableChapter = (num: number): boolean => {
+  const isReasonable = (num: number): boolean => {
     if (isNaN(num) || num <= 0) return false;
-    // Filter out typical calendar years (1990 - 2030) unless current chapter is close to it
-    if (num >= 1990 && num <= 2030 && (currentChapter < 1500 || currentChapter > 2100)) {
-      return false;
-    }
-    // Filter out common HTTP codes or giant numbers
-    if ((num === 200 || num === 404 || num === 500) && currentChapter < 150) {
-      return false;
-    }
-    if (num > 5000 && currentChapter < 4000) {
-      return false;
-    }
+    if (num >= 1990 && num <= 2030 && (currentChapter < 1500 || currentChapter > 2100)) return false;
+    if ((num === 200 || num === 404 || num === 500) && currentChapter < 150) return false;
+    if (num > 5000 && currentChapter < 4000) return false;
     return true;
   };
 
-  // 1. Check all links (a href & a text)
-  $("a").each((_, el) => {
-    const text = $(el).text().trim();
-    const href = $(el).attr("href") || "";
+  // 1. FIRST PRIORITY: Dedicated Chapter Containers
+  // If found here, we immediately return to avoid picking up sidebar/recommendation chapters!
+  for (const sel of CHAPTER_CONTAINER_SELECTORS) {
+    const containers = $(sel);
+    if (containers.length > 0) {
+      containers.each((_, container) => {
+        $(container).find("li, .chapter-item, a, .eph-num, .wp-manga-chapter").each((_, item) => {
+          const text = $(item).find(".chapternum, .chapter-manhwa-title").text().trim() || $(item).text().trim();
+          const href = $(item).attr("href") || $(item).find("a").attr("href") || "";
 
-    // Match Thai & Eng patterns e.g. "ตอนที่ 123", "ตอน 123", "Ch.123", "Chapter 123"
-    const textMatch = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
-    if (textMatch) {
-      const num = parseFloat(textMatch[1]);
-      if (isReasonableChapter(num)) foundChapters.add(num);
+          // Match chapter pattern in text
+          const mText = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
+          if (mText) {
+            const num = parseFloat(mText[1]);
+            if (isReasonable(num)) foundChapters.add(num);
+          }
+
+          // Match chapter pattern in href
+          const mHref =
+            href.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/](\d+(?:\.\d+)?)/i) ||
+            href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/) ||
+            href.match(/\/(\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
+          if (mHref) {
+            const num = parseFloat(mHref[1]);
+            if (isReasonable(num)) foundChapters.add(num);
+          }
+        });
+      });
+
+      if (foundChapters.size > 0) {
+        return Array.from(foundChapters);
+      }
     }
+  }
 
-    // Match URL path patterns (e.g. /chapter-118, /return-of-the-legend-168/, /14-return-of-the-legend/)
-    const hrefMatch =
-      href.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/](\d+(?:\.\d+)?)/i) ||
-      href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/) ||
-      href.match(/\/(\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
-    if (hrefMatch) {
-      const num = parseFloat(hrefMatch[1]);
-      if (isReasonableChapter(num)) foundChapters.add(num);
-    }
-  });
-
-  // 2. Check dropdown options (select option)
+  // 2. SECOND PRIORITY: Chapter Dropdown Selects (e.g. inside reader pages)
   $("select option").each((_, el) => {
     const text = $(el).text().trim();
     const val = $(el).attr("value") || "";
@@ -76,21 +166,46 @@ function extractChaptersFromHtml(html: string, currentChapter: number): number[]
       val.match(/(?:chapter|ch|ep|ตอน)[-_/]?(\d+(?:\.\d+)?)/i);
     if (m) {
       const num = parseFloat(m[1]);
-      if (isReasonableChapter(num)) foundChapters.add(num);
+      if (isReasonable(num)) foundChapters.add(num);
     }
   });
 
-  // 3. Check elements with chapter classes
-  $(".eplister, .chapter-list, .chapters, .listing-chapters, ul.sub-chap, .chapter-item")
-    .find("a, span, li")
-    .each((_, el) => {
-      const text = $(el).text();
-      const m = text.match(/(\d+(?:\.\d+)?)/);
-      if (m) {
-        const num = parseFloat(m[1]);
-        if (isReasonableChapter(num)) foundChapters.add(num);
+  if (foundChapters.size > 0) {
+    return Array.from(foundChapters);
+  }
+
+  // 3. THIRD PRIORITY: Fallback to General Links with Strict Slug Filtering
+  // Remove widgets, sidebars, popular items to prevent cross-manga contamination
+  EXCLUDED_CONTAINERS.forEach((exSel) => {
+    $(exSel).remove();
+  });
+
+  $("a").each((_, el) => {
+    const text = $(el).text().trim();
+    const href = $(el).attr("href") || "";
+
+    // If we have a series slug, the link's href MUST contain the slug!
+    if (seriesSlug && seriesSlug.length > 3) {
+      const decodedHref = decodeURIComponent(href).toLowerCase();
+      if (!decodedHref.includes(seriesSlug)) {
+        return; // Skip unrelated links!
       }
-    });
+    }
+
+    const textMatch = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
+    if (textMatch) {
+      const num = parseFloat(textMatch[1]);
+      if (isReasonable(num)) foundChapters.add(num);
+    }
+
+    const hrefMatch =
+      href.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/](\d+(?:\.\d+)?)/i) ||
+      href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
+    if (hrefMatch) {
+      const num = parseFloat(hrefMatch[1]);
+      if (isReasonable(num)) foundChapters.add(num);
+    }
+  });
 
   return Array.from(foundChapters);
 }
@@ -137,22 +252,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const seriesSlug = extractSeriesSlug(parsedUrl.href);
     let maxFoundChapter = Number(currentChapter);
     const checkedChapters: number[] = [];
 
     // 1. Fetch primary URL provided
     const primaryHtml = await fetchPageHtml(parsedUrl.href);
     if (primaryHtml) {
-      const chapters = extractChaptersFromHtml(primaryHtml, currentChapter);
+      const chapters = extractChaptersFromHtml(primaryHtml, seriesSlug, Number(currentChapter));
       checkedChapters.push(...chapters);
     }
 
-    // 2. If URL looks like a chapter URL, also check the series main page for full chapter list
-    const seriesUrl = deriveSeriesUrl(parsedUrl.href);
-    if (seriesUrl && seriesUrl !== parsedUrl.href) {
-      const seriesHtml = await fetchPageHtml(seriesUrl);
+    // 2. If URL is a chapter page, also find and fetch the series root page for the complete chapter list
+    const breadcrumbSeriesUrl = primaryHtml ? findSeriesUrlFromHtml(primaryHtml, parsedUrl.href) : null;
+    const derivedSeriesUrl = deriveSeriesUrl(parsedUrl.href);
+    const seriesUrlToFetch = breadcrumbSeriesUrl || derivedSeriesUrl;
+
+    if (seriesUrlToFetch && seriesUrlToFetch !== parsedUrl.href) {
+      const seriesHtml = await fetchPageHtml(seriesUrlToFetch);
       if (seriesHtml) {
-        const seriesChapters = extractChaptersFromHtml(seriesHtml, currentChapter);
+        const seriesChapters = extractChaptersFromHtml(seriesHtml, seriesSlug, Number(currentChapter));
         checkedChapters.push(...seriesChapters);
       }
     }
