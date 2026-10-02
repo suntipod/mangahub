@@ -156,6 +156,13 @@ export function deduplicateMangas(mangas: Manga[]): Manga[] {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
       const bestId = isUuid(existing.id) ? existing.id : isUuid(m.id) ? m.id : existing.id;
 
+      // Determine which record is newer (winner)
+      const existingTime = new Date(existing.updated_at || 0).getTime();
+      const mTime = new Date(m.updated_at || 0).getTime();
+      const isMNewer = mTime >= existingTime;
+      const winner = isMNewer ? m : existing;
+      const loser = isMNewer ? existing : m;
+
       // Pick best descriptive title (e.g. Thai + English or longer title)
       const bestTitle = (m.title.length > existing.title.length && !m.title.includes(" - "))
         ? m.title
@@ -175,24 +182,32 @@ export function deduplicateMangas(mangas: Manga[]): Manga[] {
         if (!hasMatch) combinedSources.push(s);
       });
 
+      // Cover URL: Prioritize winner's cover if non-empty, otherwise fallback to loser's
+      const chosenCover = (winner.cover_url && winner.cover_url.trim())
+        ? winner.cover_url.trim()
+        : (loser.cover_url && loser.cover_url.trim()) || "";
+
+      // Category & notes: Prioritize winner's values
+      const chosenCategory = winner.category || loser.category || "การ์ตูนทั่วไป";
+      const chosenNotes = winner.notes !== undefined ? winner.notes : loser.notes || "";
+      const chosenStatus = winner.status || loser.status || "reading";
+      const chosenTier = (winner.tier && winner.tier !== "none") ? winner.tier : (loser.tier || "none");
+
       const mergedManga: Manga = {
-        ...existing,
-        ...m,
+        ...loser,
+        ...winner,
         id: bestId,
         title: bestTitle,
         current_chapter: Math.max(existing.current_chapter || 0, m.current_chapter || 0),
         latest_available_chapter:
           Math.max(existing.latest_available_chapter || 0, m.latest_available_chapter || 0) || undefined,
         sources: combinedSources,
-        notes: existing.notes || m.notes,
-        category: existing.category || m.category,
-        cover_url: existing.cover_url || m.cover_url,
-        updated_at: new Date(
-          Math.max(
-            new Date(existing.updated_at || 0).getTime(),
-            new Date(m.updated_at || 0).getTime()
-          )
-        ).toISOString(),
+        notes: chosenNotes,
+        category: chosenCategory,
+        cover_url: chosenCover,
+        status: chosenStatus,
+        tier: chosenTier,
+        updated_at: new Date(Math.max(existingTime, mTime, Date.now())).toISOString(),
       };
 
       result[existingIdx] = mergedManga;
@@ -339,12 +354,12 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
     // Only push items to remote that are truly new or updated locally
     for (const m of mergedList) {
       if (isJunkManga(m)) continue;
-      const remoteItem = remoteMangas.find((rm) => rm.id === m.id);
+      const remoteItem = remoteMangas.find((rm) => rm.id === m.id || areMangasEquivalent(rm, m));
       if (remoteItem) {
-        if (new Date(m.updated_at).getTime() > new Date(remoteItem.updated_at).getTime()) {
-          await syncMangaToRemote(client, m);
+        if (new Date(m.updated_at).getTime() >= new Date(remoteItem.updated_at).getTime()) {
+          await syncMangaToRemote(client, { ...m, id: remoteItem.id });
         }
-      } else if (!remoteMangas.some((rm) => areMangasEquivalent(rm, m))) {
+      } else {
         // Truly newly created local manga not yet in Supabase
         await syncMangaToRemote(client, m);
       }
@@ -360,9 +375,12 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
 // Add or update a manga (saves to both Server & LocalStorage)
 export async function upsertManga(manga: Manga): Promise<Manga[]> {
   const current = getLocalMangas();
-  const index = current.findIndex((m) => m.id === manga.id);
+  const index = current.findIndex((m) => m.id === manga.id || areMangasEquivalent(m, manga));
+  const targetId = index >= 0 ? current[index].id : manga.id;
   const updatedManga: Manga = {
+    ...(index >= 0 ? current[index] : {}),
     ...manga,
+    id: targetId,
     updated_at: new Date().toISOString(),
   };
 
@@ -375,6 +393,14 @@ export async function upsertManga(manga: Manga): Promise<Manga[]> {
   }
 
   saveLocalMangas(newList);
+
+  // Background sync if connected to Supabase
+  const client = getSupabaseClient();
+  if (client) {
+    syncMangaToRemote(client, updatedManga).catch((err) =>
+      console.error("Background Supabase sync failed:", err)
+    );
+  }
 
   // Push to server database
   try {
@@ -392,14 +418,6 @@ export async function upsertManga(manga: Manga): Promise<Manga[]> {
     }
   } catch (err) {
     console.warn("Could not save to server API, saved to local cache:", err);
-  }
-
-  // Background sync if connected to Supabase
-  const client = getSupabaseClient();
-  if (client) {
-    syncMangaToRemote(client, updatedManga).catch((err) =>
-      console.error("Background Supabase sync failed:", err)
-    );
   }
 
   return newList;

@@ -26,6 +26,11 @@ const EXCLUDED_CONTAINERS = [
   "#sidebar",
   ".widget",
   ".bsx",
+  ".listupd",
+  ".relat",
+  ".series-recomend",
+  ".bixbox:has(.listupd)",
+  ".bixbox:has(.bsx)",
   ".related",
   ".popular",
   "footer",
@@ -260,6 +265,20 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
           const text = $(item).find(".chapternum, .chapter-manhwa-title").text().trim() || $(item).text().trim();
           const href = $(item).attr("href") || $(item).find("a").attr("href") || "";
 
+          // If href points to a completely different series slug, ignore it!
+          if (href && seriesSlug && seriesSlug.length > 3) {
+            const decodedHref = decodeURIComponent(href).toLowerCase();
+            if (
+              decodedHref.includes("http") &&
+              !decodedHref.includes(seriesSlug) &&
+              !decodedHref.includes("/read/") &&
+              !decodedHref.includes("/chapter/") &&
+              !decodedHref.includes("/ep-")
+            ) {
+              return;
+            }
+          }
+
           // Match chapter pattern in text
           const mText = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
           if (mText) {
@@ -289,9 +308,9 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
   $("select option").each((_, el) => {
     const text = $(el).text().trim();
     const val = $(el).attr("value") || "";
-    const m =
-      text.match(/(?:ตอนที่|ตอน|chapter|ch|ep)?\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i) ||
-      val.match(/(?:chapter|ch|ep|ตอน)[-_/]?(\d+(?:\.\d+)?)/i);
+    const mText = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
+    const mVal = val.match(/(?:chapter|ch|ep|ตอน)[-_/]?(\d+(?:\.\d+)?)/i);
+    const m = mText || mVal;
     if (m) {
       const num = parseFloat(m[1]);
       if (isReasonable(num)) foundChapters.add(num);

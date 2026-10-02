@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Manga, MangaSource, ReadingStatus, TierRating } from "@/types/manga";
 import {
   X,
@@ -53,6 +53,16 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
 
   // Cover image states
   const [coverUrl, setCoverUrl] = useState(manga.cover_url || "");
+  const [displayCover, setDisplayCover] = useState(manga.cover_url || "");
+  const [triedDetailProxy, setTriedDetailProxy] = useState(false);
+  const [coverImgError, setCoverImgError] = useState(false);
+
+  useEffect(() => {
+    setDisplayCover(coverUrl);
+    setTriedDetailProxy(false);
+    setCoverImgError(false);
+  }, [coverUrl]);
+
   const [searchCoverQuery, setSearchCoverQuery] = useState(manga.title);
   const [isSearchingCover, setIsSearchingCover] = useState(false);
   const [coverResults, setCoverResults] = useState<
@@ -224,11 +234,24 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
           {/* Top Info Banner */}
           <div className="flex gap-4 items-start">
             <div className="w-24 sm:w-28 aspect-[3/4] rounded-2xl overflow-hidden bg-[#0A0E17] border border-[#1F2E45] shrink-0 shadow-lg relative group">
-              {coverUrl ? (
+              {displayCover && !coverImgError ? (
                 <img
-                  src={coverUrl}
+                  src={displayCover}
                   alt={manga.title}
                   referrerPolicy="no-referrer"
+                  onError={() => {
+                    if (
+                      !triedDetailProxy &&
+                      displayCover &&
+                      !displayCover.startsWith("/api/image-proxy") &&
+                      !displayCover.startsWith("data:")
+                    ) {
+                      setTriedDetailProxy(true);
+                      setDisplayCover(`/api/image-proxy?url=${encodeURIComponent(displayCover)}`);
+                    } else {
+                      setCoverImgError(true);
+                    }
+                  }}
                   className="w-full h-full object-cover"
                 />
               ) : (

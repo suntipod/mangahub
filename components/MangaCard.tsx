@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Manga } from "@/types/manga";
 import { ExternalLink, Plus, Globe, Check, Flame, Zap, EyeOff } from "lucide-react";
 
@@ -23,6 +23,28 @@ export const MangaCard: React.FC<MangaCardProps> = ({
 }) => {
   const [justIncremented, setJustIncremented] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [currentCover, setCurrentCover] = useState(manga.cover_url || "");
+  const [triedProxy, setTriedProxy] = useState(false);
+
+  useEffect(() => {
+    setCurrentCover(manga.cover_url || "");
+    setImgError(false);
+    setTriedProxy(false);
+  }, [manga.cover_url]);
+
+  const handleImageError = () => {
+    if (
+      !triedProxy &&
+      manga.cover_url &&
+      !manga.cover_url.startsWith("/api/image-proxy") &&
+      !manga.cover_url.startsWith("data:")
+    ) {
+      setTriedProxy(true);
+      setCurrentCover(`/api/image-proxy?url=${encodeURIComponent(manga.cover_url)}`);
+    } else {
+      setImgError(true);
+    }
+  };
 
   const is18Plus = Boolean(
     manga.category &&
@@ -68,12 +90,12 @@ export const MangaCard: React.FC<MangaCardProps> = ({
         className="group relative aspect-[2/3] w-full bg-[#111827] border border-[#1F2E45]/80 hover:border-violet-500/80 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-2xl hover:shadow-violet-950/40 select-none flex flex-col justify-end"
       >
         {/* Full-Bleed Cover Image */}
-        {manga.cover_url && !imgError ? (
+        {currentCover && !imgError ? (
           <img
-            src={manga.cover_url}
+            src={currentCover}
             alt={manga.title}
             referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
+            onError={handleImageError}
             className={`absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-all duration-500 ${
               shouldBlur
                 ? "filter blur-xl brightness-50 contrast-125 scale-110 group-hover:blur-none group-hover:brightness-100 group-hover:scale-105"
@@ -242,12 +264,12 @@ export const MangaCard: React.FC<MangaCardProps> = ({
     >
       {/* Cover Image Container */}
       <div className="relative aspect-[3/4] w-full bg-[#0E1524] overflow-hidden">
-        {manga.cover_url && !imgError ? (
+        {currentCover && !imgError ? (
           <img
-            src={manga.cover_url}
+            src={currentCover}
             alt={manga.title}
             referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
+            onError={handleImageError}
             className={`w-full h-full object-cover object-center group-hover:scale-105 transition-all duration-300 ${
               shouldBlur
                 ? "filter blur-xl brightness-50 contrast-125 scale-110 group-hover:blur-none group-hover:brightness-100 group-hover:scale-105"
