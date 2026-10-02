@@ -34,6 +34,7 @@ interface SettingsModalProps {
   onSaveConfig: (config: SupabaseConfig) => void;
   onDataImported: () => void;
   onCategoriesChanged?: () => void;
+  onOpenBackup?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -43,6 +44,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveConfig,
   onDataImported,
   onCategoriesChanged,
+  onOpenBackup,
 }) => {
   if (!isOpen) return null;
 
@@ -365,27 +367,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Backup / Export Section */}
-          <div className="bg-[#141E33] border border-[#1F2E45] rounded-2xl p-4 space-y-3">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              <Download className="w-4 h-4 text-emerald-400" />
-              <span>สำรองและกู้คืนข้อมูล (Local Backup)</span>
-            </h3>
+          {/* Backup / Export Section */}
+          <div className="bg-gradient-to-br from-[#141E33] to-[#122338] border border-[#1F2E45] rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-400" />
+                <span>สำรองและกู้คืนข้อมูล (Backup & Restore)</span>
+              </h3>
+              <span className="text-[10px] text-emerald-300 font-semibold bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full">
+                JSON Safe
+              </span>
+            </div>
             <p className="text-[11px] text-gray-400">
-              ดาวน์โหลดข้อมูลเรื่องที่บันทึกไว้ทั้งหมดเป็นไฟล์ JSON เก็บไว้ในเครื่อง หรือนำเข้าข้อมูลเดิมได้ทุกเมื่อ
+              ดาวน์โหลดไฟล์สำรอง .json เซฟลงแฟลชไดรฟ์เพื่อนำไปเปิดในคอมเครื่องอื่น หรือกู้คืนข้อมูลกลับมาได้ 100%
             </p>
 
-            <div className="flex gap-2">
+            {onOpenBackup && (
               <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenBackup();
+                }}
+                className="w-full flex items-center justify-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 font-bold text-xs py-2.5 px-4 rounded-xl border border-emerald-500/30 transition shadow-sm active:scale-95"
+              >
+                <Database className="w-4 h-4 text-emerald-400" />
+                <span>เปิดหน้าต่างสำรองและกู้คืนข้อมูล (Backup Manager)</span>
+              </button>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
                 onClick={handleExportBackup}
                 className="flex-1 flex items-center justify-center gap-1.5 bg-[#1C2940] hover:bg-[#253754] text-xs font-semibold text-gray-200 py-2 px-3 rounded-xl border border-[#2A3E60] transition"
               >
                 <Download className="w-3.5 h-3.5 text-emerald-400" />
-                <span>สำรองข้อมูล (JSON)</span>
+                <span>ดาวน์โหลด JSON ด่วน</span>
               </button>
 
               <label className="flex-1 flex items-center justify-center gap-1.5 bg-[#1C2940] hover:bg-[#253754] text-xs font-semibold text-gray-200 py-2 px-3 rounded-xl border border-[#2A3E60] transition cursor-pointer">
                 <Upload className="w-3.5 h-3.5 text-violet-400" />
-                <span>นำเข้าข้อมูล (JSON)</span>
+                <span>นำเข้า JSON ด่วน</span>
                 <input
                   type="file"
                   accept=".json"

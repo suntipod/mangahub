@@ -1,5 +1,6 @@
-import { Manga, MangaSource } from "@/types/manga";
+import { Manga, MangaSource, MangaBackupData } from "@/types/manga";
 import { getSupabaseClient, syncMangaToRemote, deleteRemoteManga, fetchRemoteMangas } from "./supabase";
+import { getStoredCategories, addCategory } from "./categories";
 
 const LOCAL_STORAGE_KEY = "mangahub_local_mangas";
 const STORAGE_CLEAN_VERSION_KEY = "mangahub_cleaned_v3";
@@ -600,3 +601,117 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
     foundFromWeb: maxFoundFromWeb > 0,
   };
 }
+
+// Export all current library data with metadata & categories
+export function exportBackupData(mangas?: Manga[]): MangaBackupData {
+  const currentMangas = mangas && mangas.length > 0 ? mangas : getLocalMangas();
+  const categories = getStoredCategories();
+  const totalSources = currentMangas.reduce((acc, m) => acc + (m.sources?.length || 0), 0);
+
+  return {
+    app: "MangaHub",
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    stats: {
+      totalMangas: currentMangas.length,
+      totalSources,
+      totalCategories: categories.length,
+    },
+    categories,
+    mangas: currentMangas,
+  };
+}
+
+// Restore library data from backup payload
+export async function restoreBackupData(
+  rawPayload: any,
+  options: {
+    mode: "merge" | "replace";
+    syncSupabase?: boolean;
+  },
+  onProgress?: (current: number, total: number) => void
+): Promise<{ success: boolean; count: number; error?: string }> {
+  try {
+    if (!rawPayload) {
+      return { success: false, count: 0, error: "ไฟล์สำรองไม่มีข้อมูล" };
+    }
+
+    let importedMangas: Manga[] = [];
+    let importedCategories: string[] = [];
+
+    if (Array.isArray(rawPayload)) {
+      importedMangas = rawPayload;
+    } else if (typeof rawPayload === "object") {
+      if (Array.isArray(rawPayload.mangas)) {
+        importedMangas = rawPayload.mangas;
+      }
+      if (Array.isArray(rawPayload.categories)) {
+        importedCategories = rawPayload.categories;
+      }
+    }
+
+    if (importedMangas.length === 0) {
+      return { success: false, count: 0, error: "ไม่พบรายการมังงะในไฟล์ที่เลือก" };
+    }
+
+    // Filter valid manga objects
+    const validMangas = importedMangas.filter(
+      (m) => m && typeof m === "object" && typeof m.title === "string" && m.title.trim().length > 0
+    );
+
+    if (validMangas.length === 0) {
+      return { success: false, count: 0, error: "ไม่พบข้อมูลมังงะที่ถูกต้องในไฟล์" };
+    }
+
+    // Import any custom categories
+    if (importedCategories.length > 0) {
+      importedCategories.forEach((cat) => {
+        if (typeof cat === "string" && cat.trim()) {
+          addCategory(cat.trim());
+        }
+      });
+    }
+
+    let finalList: Manga[] = [];
+    if (options.mode === "replace") {
+      finalList = deduplicateMangas(validMangas);
+      saveLocalMangas(finalList);
+    } else {
+      const current = getLocalMangas();
+      finalList = deduplicateMangas([...validMangas, ...current]);
+      saveLocalMangas(finalList);
+    }
+
+    // If syncSupabase is requested, sync each manga to remote
+    if (options.syncSupabase) {
+      const client = getSupabaseClient();
+      if (client) {
+        for (let i = 0; i < validMangas.length; i++) {
+          try {
+            await syncMangaToRemote(client, validMangas[i]);
+          } catch (err) {
+            console.error("Supabase restore sync failed for:", validMangas[i].title, err);
+          }
+          if (onProgress) {
+            onProgress(i + 1, validMangas.length);
+          }
+        }
+      }
+    }
+
+    // Also push to server API in background
+    try {
+      fetch("/api/mangas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(finalList),
+      }).catch(() => {});
+    } catch {}
+
+    return { success: true, count: validMangas.length };
+  } catch (e: any) {
+    console.error("Restore backup error:", e);
+    return { success: false, count: 0, error: e.message || "เกิดข้อผิดพลาดในการกู้คืนข้อมูล" };
+  }
+}
+

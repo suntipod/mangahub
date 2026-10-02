@@ -48,3 +48,17 @@ export interface SupabaseConfig {
   anonKey: string;
   enabled: boolean;
 }
+
+export interface MangaBackupData {
+  app: string;
+  version: number;
+  exportedAt: string;
+  stats?: {
+    totalMangas: number;
+    totalSources: number;
+    totalCategories?: number;
+  };
+  categories?: string[];
+  mangas: Manga[];
+}
+

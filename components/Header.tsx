@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Cloud, Wifi, Flame, Loader2, Eye, EyeOff } from "lucide-react";
+import { BookOpen, RefreshCw, Settings, Plus, Cloud, Wifi, Flame, Loader2, Eye, EyeOff, Database } from "lucide-react";
 import { SupabaseConfig } from "@/types/manga";
 
 interface HeaderProps {
@@ -9,6 +9,7 @@ interface HeaderProps {
   isSyncing: boolean;
   onSync: () => void;
   onOpenSettings: () => void;
+  onOpenBackup?: () => void;
   onOpenAdd: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
@@ -24,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   isSyncing,
   onSync,
   onOpenSettings,
+  onOpenBackup,
   onOpenAdd,
   searchQuery,
   onSearchChange,
@@ -146,15 +148,27 @@ export const Header: React.FC<HeaderProps> = ({
             <span>กู้ชีพแท็บ Safari</span>
           </button>
 
+          {/* Backup & Restore JSON Button */}
+          {onOpenBackup && (
+            <button
+              onClick={onOpenBackup}
+              title="สำรองและกู้คืนข้อมูล (Backup & Restore JSON)"
+              className="p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-emerald-400 hover:text-emerald-300 transition"
+            >
+              <Database className="w-4 h-4" />
+            </button>
+          )}
+
           <button
             onClick={onOpenSettings}
-            title="ตั้งค่า Supabase / สำรองข้อมูล"
+            title="ตั้งค่าระบบ / Supabase"
             className="p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-gray-300 transition"
           >
             <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>
+
 
       {/* Mobile Search input */}
       <div className="mt-2.5 sm:hidden">

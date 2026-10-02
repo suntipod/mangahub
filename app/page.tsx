@@ -29,6 +29,7 @@ import { MangaCard } from "@/components/MangaCard";
 import { MangaDetailModal } from "@/components/MangaDetailModal";
 import { AddMangaModal } from "@/components/AddMangaModal";
 import { SettingsModal } from "@/components/SettingsModal";
+import { BackupModal } from "@/components/BackupModal";
 import {
   BookOpen,
   Plus,
@@ -103,6 +104,7 @@ export default function Home() {
   const [selectedManga, setSelectedManga] = useState<Manga | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isBackupOpen, setIsBackupOpen] = useState(false);
 
   // Load initial data (Local cache + Cloud/Server Sync)
   useEffect(() => {
@@ -399,6 +401,7 @@ export default function Home() {
         isSyncing={isSyncing}
         onSync={handleSync}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenBackup={() => setIsBackupOpen(true)}
         onOpenAdd={() => setIsAddOpen(true)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -917,7 +920,20 @@ export default function Home() {
         onSaveConfig={handleSaveConfig}
         onDataImported={() => setMangas(getLocalMangas())}
         onCategoriesChanged={() => setAvailableCategories(getStoredCategories())}
+        onOpenBackup={() => setIsBackupOpen(true)}
+      />
+
+      <BackupModal
+        isOpen={isBackupOpen}
+        onClose={() => setIsBackupOpen(false)}
+        mangas={mangas}
+        supabaseEnabled={supabaseConfig.enabled}
+        onDataRestored={() => {
+          setMangas(getLocalMangas());
+          setAvailableCategories(getStoredCategories());
+        }}
       />
     </div>
+
   );
 }
