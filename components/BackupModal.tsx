@@ -17,8 +17,9 @@ import {
   ShieldCheck,
   Layers,
   BookOpen,
+  FileSpreadsheet,
 } from "lucide-react";
-import { exportBackupData, restoreBackupData } from "@/lib/storage";
+import { exportBackupData, exportMangasToCsv, parseCsvToMangas, restoreBackupData } from "@/lib/storage";
 import { getStoredCategories } from "@/lib/categories";
 
 interface BackupModalProps {
@@ -56,7 +57,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   const categories = getStoredCategories();
   const totalSources = mangas.reduce((acc, m) => acc + (m.sources?.length || 0), 0);
 
-  // Handle Export File Download
+  // Handle Export JSON File Download
   const handleDownloadBackup = () => {
     const backupData = exportBackupData(mangas);
     const jsonString = JSON.stringify(backupData, null, 2);
@@ -65,6 +66,22 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     const dateStr = now.toISOString().split("T")[0];
     const timeStr = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
     const filename = `mangahub-backup-${dateStr}-${timeStr}.json`;
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // Handle Export Excel / CSV File Download
+  const handleDownloadCsv = () => {
+    const csvString = exportMangasToCsv(mangas);
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+    const now = new Date();
+    const dateStr = now.toISOString().split("T")[0];
+    const timeStr = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+    const filename = `mangahub-mangas-${dateStr}-${timeStr}.csv`;
 
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -86,7 +103,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     }
   };
 
-  // Handle File Selection & Parsing
+  // Handle File Selection & Parsing (Supports both JSON & Excel CSV)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -99,6 +116,35 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
+
+        // Check if file is CSV
+        if (file.name.toLowerCase().endsWith(".csv")) {
+          const { mangas: parsedMangas, categories: parsedCategories } = parseCsvToMangas(text);
+
+          if (parsedMangas.length === 0) {
+            setImportError("ไม่พบรายการมังงะในไฟล์ CSV กรุณาตรวจสอบว่ามีหัวตารางถูกต้อง");
+            setParsedData(null);
+            return;
+          }
+
+          const totalSrcs = parsedMangas.reduce((acc, m) => acc + (m.sources?.length || 0), 0);
+
+          setParsedData({
+            app: "MangaHub",
+            version: 2,
+            exportedAt: new Date().toISOString(),
+            stats: {
+              totalMangas: parsedMangas.length,
+              totalSources: totalSrcs,
+              totalCategories: parsedCategories.length,
+            },
+            categories: parsedCategories,
+            mangas: parsedMangas,
+          });
+          return;
+        }
+
+        // Standard JSON Parsing
         const parsed = JSON.parse(text);
 
         let validatedMangas: Manga[] = [];
@@ -116,7 +162,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         }
 
         if (validatedMangas.length === 0) {
-          setImportError("ไม่พบรายการมังงะในไฟล์ที่เลือก กรุณาตรวจสอบไฟล์ .json");
+          setImportError("ไม่พบรายการมังงะในไฟล์ที่เลือก กรุณาตรวจสอบไฟล์ .json หรือ .csv");
           setParsedData(null);
           return;
         }
@@ -143,7 +189,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           mangas: validList,
         });
       } catch (err: any) {
-        setImportError(`ไม่สามารถอ่านไฟล์ได้: ${err.message || "รูปแบบ JSON ไม่ถูกต้อง"}`);
+        setImportError(`ไม่สามารถอ่านไฟล์ได้: ${err.message || "รูปแบบไฟล์ไม่ถูกต้อง"}`);
         setParsedData(null);
       }
     };
@@ -286,7 +332,15 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                   className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm py-3 px-4 rounded-2xl shadow-lg shadow-emerald-600/30 transition active:scale-[0.99]"
                 >
                   <Download className="w-4 h-4" />
-                  <span>ดาวน์โหลดไฟล์สำรอง (.json)</span>
+                  <span>ดาวน์โหลดไฟล์สำรอง (.json) - กู้คืนได้ 100%</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadCsv}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-700 to-cyan-700 hover:from-teal-600 hover:to-cyan-600 text-white font-bold text-sm py-3 px-4 rounded-2xl shadow-lg shadow-cyan-700/25 transition active:scale-[0.99]"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-cyan-200" />
+                  <span>ดาวน์โหลดตาราง Excel / CSV (.csv) - เปิดดูในคอมได้ทันที</span>
                 </button>
 
                 <button
@@ -310,13 +364,13 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               {/* Flash Drive Advice */}
               <div className="bg-[#0B1120] border border-[#1E293B] rounded-2xl p-3.5 text-[11px] text-gray-400 space-y-1.5">
                 <p className="font-semibold text-gray-300 flex items-center gap-1.5">
-                  <span>💡 คำแนะนำสำหรับคอมพิวเตอร์ที่บ้าน:</span>
+                  <span>💡 คำแนะนำสำหรับสำรองข้อมูล:</span>
                 </p>
                 <p>
-                  1. กดดาวน์โหลดไฟล์ <code>.json</code> ข้างบนนี้ แล้วก๊อปลงใน Flash Drive
+                  • <strong>ไฟล์ .json</strong>: บันทึกข้อมูลครบถ้วนที่สุด เหมาะสำหรับสำรองไว้กู้คืนข้อมูลหรือย้ายเครื่อง
                 </p>
                 <p>
-                  2. เมื่อเปิดเว็บนี้ที่คอมที่บ้าน ให้เปิดหน้านี้แล้วเลือกแท็บ <strong>"กู้คืนข้อมูล"</strong> เพื่อเลือกไฟล์จาก Flash Drive ข้อมูลทั้งหมดจะกลับมาครบ 100% ทันที
+                  • <strong>ไฟล์ .csv</strong>: เปิดดูใน Microsoft Excel หรือ Google Sheets ได้ทันที ภาษาไทยไม่เพี้ยน
                 </p>
               </div>
             </div>
@@ -327,7 +381,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".json"
+                accept=".json,.csv"
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -341,7 +395,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                     <Upload className="w-6 h-6" />
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-white">คลิกเพื่อเลือกไฟล์สำรอง (.json)</div>
+                    <div className="text-xs font-bold text-white">คลิกเพื่อเลือกไฟล์สำรอง (.json หรือ .csv Excel)</div>
                     <div className="text-[11px] text-gray-400 mt-0.5">หรือลากไฟล์มาวางในช่องนี้</div>
                   </div>
                 </div>

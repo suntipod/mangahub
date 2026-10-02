@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Manga } from "@/types/manga";
+import { Manga, ReadingStatus } from "@/types/manga";
 import { ExternalLink, Plus, Globe, Check, Flame, Zap, EyeOff, BookOpen } from "lucide-react";
 
 interface MangaCardProps {
@@ -11,6 +11,7 @@ interface MangaCardProps {
   onIncrementAndOpenNext?: (manga: Manga) => void;
   onSyncToLatest?: (id: string, latestChapter: number) => void;
   onOpenReader?: (manga: Manga) => void;
+  onStatusChange?: (id: string, newStatus: ReadingStatus) => void;
   onTagClick?: (tag: string) => void;
   isRecentlyRead?: boolean;
   viewMode?: "poster" | "compact";
@@ -24,6 +25,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
   onIncrementAndOpenNext,
   onSyncToLatest,
   onOpenReader,
+  onStatusChange,
   onTagClick,
   isRecentlyRead = false,
   viewMode = "poster",
@@ -232,16 +234,27 @@ export const MangaCard: React.FC<MangaCardProps> = ({
 
             {/* Reading Status Badge if not reading */}
             {manga.status && manga.status !== "reading" && (
-              <span
-                className={`backdrop-blur-md text-[9px] font-black px-1.5 py-0.5 rounded-md shadow ${
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onStatusChange) {
+                    const statusCycle: ReadingStatus[] = ["reading", "on_hold", "completed", "dropped"];
+                    const curIdx = statusCycle.indexOf(manga.status);
+                    const nextStatus = statusCycle[(curIdx + 1) % statusCycle.length];
+                    onStatusChange(manga.id, nextStatus);
+                  }
+                }}
+                className={`backdrop-blur-md text-[9px] font-black px-1.5 py-0.5 rounded-md shadow pointer-events-auto transition active:scale-90 ${
                   manga.status === "completed"
                     ? "bg-blue-600 text-white shadow-blue-600/30"
                     : manga.status === "on_hold"
                     ? "bg-amber-600 text-white shadow-amber-600/30"
                     : manga.status === "dropped"
                     ? "bg-rose-700 text-white shadow-rose-700/30"
-                    : "bg-gray-700 text-gray-200"
+                    : "bg-purple-700 text-white shadow-purple-700/30"
                 }`}
+                title="คลิกเพื่อสลับสถานะการอ่าน (กำลังอ่าน ➔ ดองไว้ ➔ อ่านจบ ➔ เท)"
               >
                 {manga.status === "completed"
                   ? "✅ จบ"
@@ -250,7 +263,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                   : manga.status === "dropped"
                   ? "🛑 เท"
                   : "📌 รอ"}
-              </span>
+              </button>
             )}
           </div>
         </div>
@@ -303,6 +316,17 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                   +{manga.tags.length - 3}
                 </span>
               )}
+            </div>
+          )}
+
+          {/* Notes Memo Badge */}
+          {manga.notes && manga.notes.trim() && (
+            <div
+              className="mt-1.5 px-2 py-0.5 rounded-lg bg-amber-500/25 border border-amber-400/40 text-amber-200 text-[10px] backdrop-blur-md flex items-center gap-1.5 shadow pointer-events-none"
+              title={`บันทึกช่วยจำ: ${manga.notes}`}
+            >
+              <span className="shrink-0 text-[10px]">📝</span>
+              <span className="truncate font-semibold">{manga.notes}</span>
             </div>
           )}
 
@@ -516,16 +540,27 @@ export const MangaCard: React.FC<MangaCardProps> = ({
               {manga.title}
             </h3>
             {manga.status && manga.status !== "reading" && (
-              <span
-                className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-md shadow ${
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onStatusChange) {
+                    const statusCycle: ReadingStatus[] = ["reading", "on_hold", "completed", "dropped"];
+                    const curIdx = statusCycle.indexOf(manga.status);
+                    const nextStatus = statusCycle[(curIdx + 1) % statusCycle.length];
+                    onStatusChange(manga.id, nextStatus);
+                  }
+                }}
+                className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-md shadow transition active:scale-90 ${
                   manga.status === "completed"
                     ? "bg-blue-600 text-white"
                     : manga.status === "on_hold"
                     ? "bg-amber-600 text-white"
                     : manga.status === "dropped"
                     ? "bg-rose-700 text-white"
-                    : "bg-gray-700 text-gray-200"
+                    : "bg-purple-700 text-white"
                 }`}
+                title="คลิกเพื่อสลับสถานะการอ่าน (กำลังอ่าน ➔ ดองไว้ ➔ อ่านจบ ➔ เท)"
               >
                 {manga.status === "completed"
                   ? "✅ จบ"
@@ -534,7 +569,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                   : manga.status === "dropped"
                   ? "🛑 เท"
                   : "📌 รอ"}
-              </span>
+              </button>
             )}
           </div>
           {manga.alt_title && (
@@ -564,6 +599,17 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                   +{manga.tags.length - 3}
                 </span>
               )}
+            </div>
+          )}
+
+          {/* Notes Memo Badge */}
+          {manga.notes && manga.notes.trim() && (
+            <div
+              className="mt-2 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/30 text-amber-200 text-xs flex items-center gap-1.5 shadow-sm"
+              title={`บันทึกช่วยจำ: ${manga.notes}`}
+            >
+              <span className="shrink-0 text-xs">📝</span>
+              <span className="truncate font-semibold">{manga.notes}</span>
             </div>
           )}
         </div>

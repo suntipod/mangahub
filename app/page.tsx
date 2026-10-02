@@ -53,6 +53,7 @@ import {
   Dices,
   BarChart3,
   Loader2,
+  Database,
 } from "lucide-react";
 
 export default function Home() {
@@ -445,6 +446,22 @@ export default function Home() {
     });
   };
 
+  // Quick switch reading status
+  const handleStatusChange = async (id: string, newStatus: ReadingStatus) => {
+    await trackSyncMutation(async () => {
+      const current = getLocalMangas();
+      const target = current.find((m) => m.id === id);
+      if (!target) return;
+      const updatedManga: Manga = {
+        ...target,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      };
+      const updated = await upsertManga(updatedManga);
+      setMangas(updated);
+    });
+  };
+
   // Save Supabase Config
   const handleSaveConfig = (newConfig: SupabaseConfig) => {
     setSupabaseConfig(newConfig);
@@ -673,6 +690,16 @@ export default function Home() {
               <span>สถิติ 📊</span>
             </button>
 
+            {/* Backup & Export / Import Button */}
+            <button
+              onClick={() => setIsBackupOpen(true)}
+              className="flex items-center justify-center gap-1.5 bg-[#182338] hover:bg-[#20304c] text-emerald-300 border border-emerald-500/30 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              title="สำรองข้อมูล / กู้คืน / ดาวน์โหลด Excel CSV และ JSON"
+            >
+              <Database className="w-4 h-4 text-emerald-400" />
+              <span>สำรองข้อมูล 💾</span>
+            </button>
+
             <button
               onClick={handleCheckAllUpdates}
               disabled={isCheckingUpdates}
@@ -824,6 +851,15 @@ export default function Home() {
                         มีตอนใหม่!
                       </span>
                     )}
+                  {recentlyReadManga.notes && recentlyReadManga.notes.trim() && (
+                    <span
+                      className="text-[11px] text-amber-300 font-medium bg-amber-950/40 border border-amber-600/30 px-2 py-0.5 rounded-lg flex items-center gap-1 max-w-[260px] truncate"
+                      title={`บันทึกช่วยจำ: ${recentlyReadManga.notes}`}
+                    >
+                      <span>📝</span>
+                      <span className="truncate">{recentlyReadManga.notes}</span>
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1178,6 +1214,7 @@ export default function Home() {
                 onIncrementAndOpenNext={handleIncrementAndOpenNext}
                 onSyncToLatest={handleSyncToLatest}
                 onOpenReader={handleOpenReader}
+                onStatusChange={handleStatusChange}
                 onTagClick={(tag) => setSelectedTag(selectedTag === tag ? null : tag)}
               />
             ))}

@@ -735,6 +735,241 @@ export function exportBackupData(mangas?: Manga[]): MangaBackupData {
   };
 }
 
+const STATUS_LABELS_THAI: Record<string, string> = {
+  reading: "กำลังอ่าน",
+  on_hold: "ดองไว้ก่อน",
+  completed: "อ่านจบแล้ว",
+  dropped: "ดรอป/เลิกอ่าน",
+  plan_to_read: "อยากอ่าน",
+};
+
+// Export library as an Excel-compatible CSV string (with UTF-8 BOM \uFEFF for Thai support)
+export function exportMangasToCsv(mangas?: Manga[]): string {
+  const currentMangas = mangas && mangas.length > 0 ? mangas : getLocalMangas();
+
+  const headers = [
+    "ชื่อเรื่อง",
+    "ชื่อเรื่องรอง (Alt Title)",
+    "ตอนที่อ่านถึง",
+    "ตอนล่าสุดบนเว็บ",
+    "สถานะการอ่าน",
+    "ระดับความชอบ (Tier)",
+    "หมวดหมู่",
+    "บันทึกช่วยจำ (Notes)",
+    "แท็ก",
+    "เว็บอ่านหลัก",
+    "ลิงก์ตอนปัจจุบัน",
+    "ลิงก์หน้าหลักการ์ตูน",
+    "อ่านล่าสุดเมื่อ",
+    "ลิงก์รูปหน้าปก",
+  ];
+
+  const escapeCsv = (val: any): string => {
+    if (val === undefined || val === null) return "";
+    const str = String(val);
+    if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const rows = currentMangas.map((m) => {
+    const primarySource = m.sources?.find((s) => s.is_primary) || m.sources?.[0];
+    const statusText = STATUS_LABELS_THAI[m.status] || m.status || "กำลังอ่าน";
+    const tagsText = Array.isArray(m.tags) ? m.tags.join("; ") : "";
+    const tierText = m.tier && m.tier !== "none" ? m.tier : "";
+
+    return [
+      escapeCsv(m.title),
+      escapeCsv(m.alt_title || ""),
+      escapeCsv(m.current_chapter ?? 0),
+      escapeCsv(m.latest_available_chapter ?? ""),
+      escapeCsv(statusText),
+      escapeCsv(tierText),
+      escapeCsv(m.category || "การ์ตูนทั่วไป"),
+      escapeCsv(m.notes || ""),
+      escapeCsv(tagsText),
+      escapeCsv(primarySource?.site_name || ""),
+      escapeCsv(primarySource?.current_chapter_url || ""),
+      escapeCsv(primarySource?.base_url || ""),
+      escapeCsv(m.last_read_at || ""),
+      escapeCsv(m.cover_url || ""),
+    ].join(",");
+  });
+
+  // Prepend \uFEFF (UTF-8 BOM) so Microsoft Excel opens Thai text without garbled characters
+  return "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
+}
+
+// Parse CSV text into 2D string matrix
+export function parseCsvRows(text: string): string[][] {
+  const clean = text.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentVal = "";
+  let insideQuotes = false;
+
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    const next = clean[i + 1];
+
+    if (c === '"') {
+      if (insideQuotes && next === '"') {
+        currentVal += '"';
+        i++; // skip escaped quote
+      } else {
+        insideQuotes = !insideQuotes;
+      }
+    } else if (c === "," && !insideQuotes) {
+      currentRow.push(currentVal);
+      currentVal = "";
+    } else if ((c === "\r" || c === "\n") && !insideQuotes) {
+      if (c === "\r" && next === "\n") i++;
+      currentRow.push(currentVal);
+      if (currentRow.some((col) => col.trim().length > 0)) {
+        rows.push(currentRow);
+      }
+      currentRow = [];
+      currentVal = "";
+    } else {
+      currentVal += c;
+    }
+  }
+
+  if (currentVal || currentRow.length > 0) {
+    currentRow.push(currentVal);
+    if (currentRow.some((col) => col.trim().length > 0)) {
+      rows.push(currentRow);
+    }
+  }
+
+  return rows;
+}
+
+// Convert parsed CSV rows into Manga objects & discovered categories
+export function parseCsvToMangas(csvText: string): { mangas: Manga[]; categories: string[] } {
+  const matrix = parseCsvRows(csvText);
+  if (matrix.length === 0) return { mangas: [], categories: [] };
+
+  const firstRow = matrix[0].map((h) => h.trim().toLowerCase());
+  let headerIndex = 0;
+
+  // Find column mapping from header
+  const findCol = (keywords: string[]): number => {
+    return firstRow.findIndex((h) => keywords.some((k) => h.includes(k.toLowerCase())));
+  };
+
+  const titleCol = findCol(["ชื่อเรื่อง", "title", "name"]);
+  const altTitleCol = findCol(["ชื่อเรื่องรอง", "alt", "secondary"]);
+  const curChCol = findCol(["ตอนที่อ่าน", "current", "ch", "chapter"]);
+  const latestChCol = findCol(["ตอนล่าสุด", "latest", "update"]);
+  const statusCol = findCol(["สถานะ", "status"]);
+  const tierCol = findCol(["tier", "ระดับ"]);
+  const categoryCol = findCol(["หมวดหมู่", "category", "genre"]);
+  const notesCol = findCol(["บันทึก", "note", "memo"]);
+  const tagsCol = findCol(["แท็ก", "tag"]);
+  const siteCol = findCol(["เว็บ", "site", "source"]);
+  const curUrlCol = findCol(["ตอนปัจจุบัน", "chapter_url", "current_url", "url"]);
+  const baseCol = findCol(["หน้าหลัก", "base_url", "main_url"]);
+  const coverCol = findCol(["รูป", "cover", "image"]);
+
+  // If first row looked like a header row, start from row 1; else row 0
+  const dataRows = titleCol !== -1 ? matrix.slice(1) : matrix;
+
+  const mangas: Manga[] = [];
+  const categoriesSet = new Set<string>();
+
+  for (let idx = 0; idx < dataRows.length; idx++) {
+    const row = dataRows[idx];
+    const getVal = (col: number, fallbackCol?: number) => {
+      if (col >= 0 && row[col] !== undefined) return row[col].trim();
+      if (fallbackCol !== undefined && fallbackCol >= 0 && row[fallbackCol] !== undefined) {
+        return row[fallbackCol].trim();
+      }
+      return "";
+    };
+
+    const title = getVal(titleCol, 0);
+    if (!title) continue;
+
+    const altTitle = getVal(altTitleCol, 1);
+    const curChRaw = parseFloat(getVal(curChCol, 2)) || 1;
+    const latestChRaw = parseFloat(getVal(latestChCol, 3)) || undefined;
+
+    // Map status
+    const statusRaw = getVal(statusCol, 4).toLowerCase();
+    let status: Manga["status"] = "reading";
+    if (statusRaw.includes("ดอง") || statusRaw.includes("hold")) {
+      status = "on_hold";
+    } else if (statusRaw.includes("จบ") || statusRaw.includes("complete")) {
+      status = "completed";
+    } else if (statusRaw.includes("ดรอป") || statusRaw.includes("เท") || statusRaw.includes("drop")) {
+      status = "dropped";
+    } else if (statusRaw.includes("อยาก") || statusRaw.includes("แผน") || statusRaw.includes("plan")) {
+      status = "plan_to_read";
+    }
+
+    // Map Tier
+    const tierRaw = getVal(tierCol, 5).toUpperCase();
+    let tier: Manga["tier"] = "none";
+    if (["S", "A", "B", "C", "D"].includes(tierRaw)) {
+      tier = tierRaw as Manga["tier"];
+    }
+
+    // Category
+    const category = getVal(categoryCol, 6) || "การ์ตูนทั่วไป";
+    categoriesSet.add(category);
+
+    // Notes
+    const notes = getVal(notesCol, 7);
+
+    // Tags
+    const tagsRaw = getVal(tagsCol, 8);
+    const tags = tagsRaw
+      ? tagsRaw.split(/[;,]/).map((t) => t.trim().replace(/^#/, "")).filter(Boolean)
+      : [];
+
+    // Sources
+    const siteName = getVal(siteCol, 9) || "เว็บอ่านหลัก";
+    const currentChapterUrl = getVal(curUrlCol, 10);
+    const baseUrl = getVal(baseCol, 11) || currentChapterUrl;
+    const coverUrl = getVal(coverCol, 13);
+
+    const sources: MangaSource[] = [];
+    if (currentChapterUrl || baseUrl) {
+      sources.push({
+        id: `src-${Date.now()}-${idx}`,
+        site_name: siteName,
+        base_url: baseUrl,
+        current_chapter_url: currentChapterUrl,
+        is_primary: true,
+        is_active: true,
+      });
+    }
+
+    const now = new Date().toISOString();
+    mangas.push({
+      id: `manga-csv-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+      title,
+      alt_title: altTitle || undefined,
+      cover_url: coverUrl || "",
+      current_chapter: curChRaw,
+      latest_available_chapter: latestChRaw,
+      status,
+      tier,
+      category,
+      notes: notes || undefined,
+      tags,
+      sources,
+      last_read_at: now,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  return { mangas, categories: Array.from(categoriesSet) };
+}
+
 // Restore library data from backup payload
 export async function restoreBackupData(
   rawPayload: any,

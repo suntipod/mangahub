@@ -364,19 +364,41 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
                 <p className="text-xs text-gray-400 mt-0.5">{manga.alt_title}</p>
               )}
 
-              {/* Status, Tier & Category Selectors */}
-              <div className="mt-3 flex flex-wrap gap-2 items-center">
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as ReadingStatus)}
-                  className="bg-[#182338] border border-[#233554] text-xs font-semibold rounded-xl px-2.5 py-1.5 text-gray-200 outline-none"
-                >
-                  <option value="reading">📖 กำลังอ่าน</option>
-                  <option value="on_hold">⏳ ดองไว้รอตอนเยอะ</option>
-                  <option value="completed">✅ อ่านจบแล้ว</option>
-                  <option value="dropped">🛑 เท / เลิกอ่าน</option>
-                  <option value="plan_to_read">📌 มีแผนจะอ่าน</option>
-                </select>
+              {/* Status Selector Buttons */}
+              <div className="mt-3">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5">
+                  สถานะการอ่าน:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { id: "reading", label: "กำลังอ่าน", icon: "📖", activeClass: "bg-emerald-600 text-white shadow-emerald-600/40 border-emerald-400" },
+                    { id: "on_hold", label: "ดองไว้ก่อน", icon: "⏳", activeClass: "bg-amber-600 text-white shadow-amber-600/40 border-amber-400" },
+                    { id: "completed", label: "อ่านจบแล้ว", icon: "✅", activeClass: "bg-blue-600 text-white shadow-blue-600/40 border-blue-400" },
+                    { id: "dropped", label: "ดรอป/เทแล้ว", icon: "🛑", activeClass: "bg-rose-700 text-white shadow-rose-700/40 border-rose-500" },
+                    { id: "plan_to_read", label: "อยากอ่าน", icon: "📌", activeClass: "bg-purple-700 text-white shadow-purple-700/40 border-purple-500" },
+                  ].map((st) => {
+                    const isSelected = status === st.id;
+                    return (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => setStatus(st.id as ReadingStatus)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition active:scale-95 ${
+                          isSelected
+                            ? `${st.activeClass} shadow-md`
+                            : "bg-[#141E33] border-[#1F2E45] text-gray-400 hover:text-gray-200 hover:border-gray-600"
+                        }`}
+                      >
+                        <span>{st.icon}</span>
+                        <span>{st.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Tier & Category Selectors */}
+              <div className="mt-2.5 flex flex-wrap gap-2 items-center">
 
 
                 <select
@@ -909,19 +931,58 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
             </div>
           </div>
 
-          {/* Notes Section */}
-          <div className="space-y-1.5">
+          {/* Notes Section (Private Notes / Memo) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                <span>📝 บันทึกช่วยจำส่วนตัว (Private Memo)</span>
+              </label>
+              {notes && (
+                <button
+                  type="button"
+                  onClick={() => setNotes("")}
+                  className="text-[10px] text-gray-400 hover:text-red-400 transition"
+                >
+                  ล้างข้อความ
+                </button>
+              )}
+            </div>
 
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              บันทึกช่วยจำ (Notes)
-            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="บันทึกช่วยจำ เช่น สนุกมาก, พระเอกเทพ, รอดองให้จบซีซั่น..."
+              placeholder="บันทึกช่วยจำ เช่น พักไว้รอแปลจบภาค 1, พระเอกกำลังบุกดันเจี้ยนชั้น 50, หยุดรอตอนที่ 150..."
               rows={2}
               className="w-full bg-[#141E33] border border-[#1F2E45] rounded-xl p-3 text-xs text-gray-200 outline-none focus:border-violet-500 resize-none"
             />
+
+            {/* Quick Memo Suggestion Chips */}
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              <span className="text-[10px] text-gray-400 self-center mr-1">ข้อความด่วน:</span>
+              {[
+                "⏳ พักไว้รอแปลจบภาค 1",
+                "🛑 หยุดรอตอนที่ 150 ค่อยอ่านต่อ",
+                "⚔️ พระเอกกำลังบุกดันเจี้ยน",
+                "✨ เรื่องโปรด สนุกมาก ห้ามลืมอ่าน",
+                "⚠️ เว็บแปลหยุดแปลชั่วคราว",
+                "🔥 รอแปลอังกฤษ / รวมเล่ม",
+              ].map((memo) => (
+                <button
+                  key={memo}
+                  type="button"
+                  onClick={() => {
+                    if (!notes) {
+                      setNotes(memo);
+                    } else if (!notes.includes(memo)) {
+                      setNotes(`${notes} • ${memo}`);
+                    }
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded-lg border border-[#1F2E45] bg-[#0E1524] text-amber-200/90 hover:text-amber-200 hover:border-amber-500/40 hover:bg-amber-950/20 transition active:scale-95"
+                >
+                  +{memo}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
