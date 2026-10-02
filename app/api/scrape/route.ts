@@ -20,6 +20,24 @@ function getSiteNameFromUrl(urlString: string): string {
   }
 }
 
+// Helper to extract chapter number from text, headings, or breadcrumbs
+function extractChapterFromText(text: string): number | undefined {
+  if (!text) return undefined;
+  // 1. "ตอนที่ 116", "ตอน 116", "Chapter 116", "Ch. 116", "Ep. 116"
+  const m1 = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
+  if (m1 && m1[1]) {
+    const num = parseFloat(m1[1]);
+    if (!isNaN(num) && num > 0 && num < 4000) return num;
+  }
+  // 2. "Title 14 – Site" or "Title 14 - ตอนที่"
+  const m2 = text.match(/\s+(\d+(?:\.\d+)?)\s*[-–|•]/);
+  if (m2 && m2[1]) {
+    const num = parseFloat(m2[1]);
+    if (!isNaN(num) && num > 0 && num < 4000) return num;
+  }
+  return undefined;
+}
+
 // Helper to extract chapter number from URL path
 function extractChapterFromUrl(urlString: string): number | undefined {
   try {
@@ -31,20 +49,31 @@ function extractChapterFromUrl(urlString: string): number | undefined {
       return undefined;
     }
 
-    // Patterns like /chapter-118, /ep-118, /ch-118, /118, /ตอนที่-118, -91/
-    const match =
-      path.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
-      path.match(/[-_](\d+(?:\.\d+)?)\/?$/) ||
-      path.match(/\/(\d+(?:\.\d+)?)\/?$/);
-    if (match && match[1]) {
-      const num = parseFloat(match[1]);
-      if (!isNaN(num) && num > 0) {
+    // 1. Standard patterns: /chapter-118, /ep-118, /ch-118, /ตอนที่-118, /ตอน-118
+    const m1 = path.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i);
+    if (m1 && m1[1]) {
+      const num = parseFloat(m1[1]);
+      if (!isNaN(num) && num > 0 && num < 4000) return num;
+    }
+
+    // 2. Trailing numbers: -118/, _118/, /118/
+    const m2 = path.match(/[-_](\d+(?:\.\d+)?)\/?$/) || path.match(/\/(\d+(?:\.\d+)?)\/?$/);
+    if (m2 && m2[1]) {
+      const num = parseFloat(m2[1]);
+      if (!isNaN(num) && num > 0 && num < 4000) {
         // Discard large internal database auto-increment IDs (e.g. /read/25347)
         if (num > 3000 && /\/read\/\d+$/i.test(path)) {
           return undefined;
         }
         return num;
       }
+    }
+
+    // 3. Leading numbers in slug: /14-return-of-the-legend/
+    const m3 = path.match(/^\/?(\d+(?:\.\d+)?)[-_][a-zA-Z]/) || path.match(/\/(\d+(?:\.\d+)?)[-_][a-zA-Z]/);
+    if (m3 && m3[1]) {
+      const num = parseFloat(m3[1]);
+      if (!isNaN(num) && num > 0 && num < 4000) return num;
     }
   } catch {
     // Ignore error
@@ -261,7 +290,7 @@ export async function POST(req: NextRequest) {
     }
 
     const siteName = getSiteNameFromUrl(parsedUrl.href);
-    const detectedChapter = extractChapterFromUrl(parsedUrl.href);
+    let detectedChapter = extractChapterFromUrl(parsedUrl.href);
     const urlDerived = smartDeriveFromUrl(parsedUrl.href);
     const cleanProvidedTitle = typeof providedTitle === "string" ? cleanTitle(providedTitle) : "";
 
@@ -330,6 +359,29 @@ export async function POST(req: NextRequest) {
           seriesUrl = breadcrumbSeries;
         }
 
+        // 4. Extract Chapter from HTML if not detected from URL alone
+        if (!detectedChapter) {
+          // Check reader dropdown option (e.g. <select id="chapter"><option selected>ตอนที่ 14</option></select>)
+          $('select option:selected, select option[selected]').each((_, el) => {
+            const optText = $(el).text();
+            const ch = extractChapterFromText(optText) || extractChapterFromUrl($(el).attr("value") || "");
+            if (ch && !detectedChapter) detectedChapter = ch;
+          });
+
+          // Check breadcrumbs (e.g. <ul class="breadcrumb"><li>ตอนที่ 39</li></ul>)
+          if (!detectedChapter) {
+            const breadcrumbText = $(".breadcrumb, .ts-breadcrumb, .c-breadcrumb, .trail, .entry-breadcrumb").text();
+            const bcCh = extractChapterFromText(breadcrumbText);
+            if (bcCh) detectedChapter = bcCh;
+          }
+
+          // Check rawTitle (e.g. "Return of the Legend 14 – SING-MANGA" or "ตอนที่ 21 แปลไทย")
+          if (!detectedChapter && rawTitle) {
+            const titleCh = extractChapterFromText(rawTitle);
+            if (titleCh) detectedChapter = titleCh;
+          }
+        }
+
         fetchSuccess = true;
       }
     } catch (fetchErr) {
@@ -392,6 +444,7 @@ export async function POST(req: NextRequest) {
         title,
         cover_url: coverUrl,
         current_chapter: detectedChapter || 1,
+        detected_chapter: detectedChapter || null,
         site_name: siteName,
         series_url: seriesUrl || parsedUrl.href,
         original_url: parsedUrl.href,

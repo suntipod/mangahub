@@ -38,6 +38,63 @@ interface BatchItem {
   userTitle?: string;
 }
 
+// Helper to extract chapter number from URL path or text
+export function extractChapterFromUrlOrText(urlOrText: string): number | null {
+  if (!urlOrText) return null;
+  try {
+    // 1. If it contains a URL
+    if (urlOrText.includes("http://") || urlOrText.includes("https://")) {
+      const urlMatch = urlOrText.match(/https?:\/\/[^\s,\]\)]+/i);
+      if (urlMatch) {
+        const u = new URL(urlMatch[0]);
+        const path = decodeURIComponent(u.pathname);
+        if (!/(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(path)) {
+          // A. Standard patterns: /chapter-118, /ตอนที่-118, /ep-118, /ch-118
+          const m1 = path.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i);
+          if (m1 && m1[1]) {
+            const num = parseFloat(m1[1]);
+            if (!isNaN(num) && num > 0 && num < 4000) return num;
+          }
+
+          // B. Trailing number: -118/, _118/, /118/
+          const m2 = path.match(/[-_](\d+(?:\.\d+)?)\/?$/) || path.match(/\/(\d+(?:\.\d+)?)\/?$/);
+          if (m2 && m2[1]) {
+            const num = parseFloat(m2[1]);
+            if (!isNaN(num) && num > 0 && num < 4000) {
+              if (!(num > 3000 && /\/read\/\d+$/i.test(path))) {
+                return num;
+              }
+            }
+          }
+
+          // C. Leading number in slug: /14-return-of-the-legend/
+          const m3 = path.match(/^\/?(\d+(?:\.\d+)?)[-_][a-zA-Z]/) || path.match(/\/(\d+(?:\.\d+)?)[-_][a-zA-Z]/);
+          if (m3 && m3[1]) {
+            const num = parseFloat(m3[1]);
+            if (!isNaN(num) && num > 0 && num < 4000) return num;
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Text patterns: "ตอนที่ 116", "Chapter 116", "Ch. 116", "Ep. 116"
+  const tm1 = urlOrText.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
+  if (tm1 && tm1[1]) {
+    const num = parseFloat(tm1[1]);
+    if (!isNaN(num) && num > 0 && num < 4000) return num;
+  }
+
+  // 3. Suffix / separator patterns: "Title 14 – Site" or " 14 - "
+  const tm2 = urlOrText.match(/\s+(\d+(?:\.\d+)?)\s*[-–|•]/);
+  if (tm2 && tm2[1]) {
+    const num = parseFloat(tm2[1]);
+    if (!isNaN(num) && num > 0 && num < 4000) return num;
+  }
+
+  return null;
+}
+
 function parseLinesToBatchItems(text: string): BatchItem[] {
   const lines = text.split(/[\r\n]+/);
   const items: BatchItem[] = [];
@@ -77,9 +134,9 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
 
     // A. Check for chapter in title text (e.g. "ตอนที่ 62" or "ตอนที่ 1" or "Chapter 50")
     if (userTitle) {
-      const chInTitle = userTitle.match(/(?:ตอนที่|ตอน|ch|chapter)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
-      if (chInTitle) {
-        chapter = parseFloat(chInTitle[1]);
+      const ch = extractChapterFromUrlOrText(userTitle);
+      if (ch) {
+        chapter = ch;
         chFound = true;
       }
     }
@@ -87,30 +144,19 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
     // B. Check for chapter after URL if not found in title
     if (!chFound) {
       const rest = line.replace(itemUrl, "").replace(userTitle, "").trim();
-      const explicitMatch = rest.match(/(?:ตอนที่|ตอน|ch|chapter)?\s*[:=,-]?\s*(\d+(?:\.\d+)?)/i);
-      if (explicitMatch) {
-        const num = parseFloat(explicitMatch[1]);
-        if (!isNaN(num) && num > 0 && num < 4000) {
-          chapter = num;
-          chFound = true;
-        }
+      const ch = extractChapterFromUrlOrText(rest);
+      if (ch) {
+        chapter = ch;
+        chFound = true;
       }
     }
 
-    // C. Or auto-extract chapter from URL (e.g. /chapter/155, /155), rejecting internal routing IDs
+    // C. Or auto-extract chapter from URL (with decodeURIComponent, query stripping, leading/trailing slug numbers)
     if (!chFound) {
-      const isInternalId = /(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(itemUrl);
-      if (!isInternalId) {
-        const urlChMatch =
-          itemUrl.match(/(?:chapter|ch|ep|ตอนที่|ตอน)[-_/]?(\d+(?:\.\d+)?)/i) ||
-          itemUrl.match(/[-_](\d+(?:\.\d+)?)\/?$/) ||
-          itemUrl.match(/\/(\d+(?:\.\d+)?)\/?$/);
-        if (urlChMatch) {
-          const num = parseFloat(urlChMatch[1]);
-          if (!isNaN(num) && num > 0 && num < 4000) {
-            chapter = num;
-          }
-        }
+      const ch = extractChapterFromUrlOrText(itemUrl);
+      if (ch) {
+        chapter = ch;
+        chFound = true;
       }
     }
 
@@ -211,7 +257,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   const [pasteBatchSuccess, setPasteBatchSuccess] = useState(false);
 
   // Auto-scrape single URL (supports direct URL parameter from clipboard)
-  const handleScrape = async (overrideUrl?: string, overrideTitle?: string) => {
+  const handleScrape = async (overrideUrl?: string, overrideTitle?: string, overrideChapter?: number | null) => {
     const targetUrl = (overrideUrl !== undefined ? overrideUrl : url).trim();
     if (!targetUrl) {
       setErrorMsg("กรุณาวาง URL หน้าเรื่องการ์ตูนก่อนครับ");
@@ -237,7 +283,13 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       const data = json.data;
       setTitle(data.title || overrideTitle || "");
       setCoverUrl(data.cover_url || "");
-      if (data.current_chapter) {
+      if (data.detected_chapter) {
+        setChapter(data.detected_chapter);
+      } else if (overrideChapter && overrideChapter > 1) {
+        setChapter(overrideChapter);
+      } else if (data.current_chapter && data.current_chapter > 1) {
+        setChapter(data.current_chapter);
+      } else if (chapter <= 1 && data.current_chapter) {
         setChapter(data.current_chapter);
       }
       setSiteName(data.site_name || "Manga Site");
@@ -293,10 +345,12 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       }
 
       if (userProvidedTitle) {
-        const chMatch = userProvidedTitle.match(/(?:ตอนที่|ตอน|ch|chapter)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
-        if (chMatch) {
-          userProvidedChapter = parseFloat(chMatch[1]);
-        }
+        const ch = extractChapterFromUrlOrText(userProvidedTitle);
+        if (ch) userProvidedChapter = ch;
+      }
+      if (!userProvidedChapter && targetUrl) {
+        const ch = extractChapterFromUrlOrText(targetUrl);
+        if (ch) userProvidedChapter = ch;
       }
 
       setUrl(targetUrl);
@@ -306,8 +360,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       setPasteSingleSuccess(true);
       setTimeout(() => setPasteSingleSuccess(false), 1500);
 
-      // Immediately trigger scrape
-      handleScrape(targetUrl, userProvidedTitle);
+      // Immediately trigger scrape with detected chapter
+      handleScrape(targetUrl, userProvidedTitle, userProvidedChapter);
     } catch (err: any) {
       console.warn("Clipboard access denied:", err);
       setErrorMsg("ไม่สามารถเข้าถึงคลิปบอร์ดได้ (เบราว์เซอร์อาจต้องกดยืนยันการอนุญาตสิทธิ์ หรือวางด้วยตนเอง)");
@@ -429,8 +483,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
           if (json.success && json.data) {
             scrapedTitle = json.data.title || "";
             scrapedCover = json.data.cover_url || "";
-            if (item.chapter === 1 && json.data.current_chapter && json.data.current_chapter > 1) {
-              chosenChapter = json.data.current_chapter;
+            if (item.chapter === 1 && (json.data.detected_chapter || (json.data.current_chapter && json.data.current_chapter > 1))) {
+              chosenChapter = json.data.detected_chapter || json.data.current_chapter;
             }
             if (json.data.site_name) scrapedSite = json.data.site_name;
             if (json.data.series_url) scrapedSeriesUrl = json.data.series_url;
@@ -896,7 +950,20 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                     type="url"
                     placeholder="https://www.up-manga.com/manga/..."
                     value={url}
-                    onChange={(e) => setUrl(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setUrl(val);
+                      const detectedCh = extractChapterFromUrlOrText(val);
+                      if (detectedCh && (chapter <= 1 || chapter === 0)) {
+                        setChapter(detectedCh);
+                      }
+                    }}
+                    onBlur={() => {
+                      const detectedCh = extractChapterFromUrlOrText(url);
+                      if (detectedCh && (chapter <= 1 || chapter === 0)) {
+                        setChapter(detectedCh);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleScrape();
                     }}
