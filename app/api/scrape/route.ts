@@ -182,60 +182,7 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
   }
 }
 
-// Function to query AniList for HD cover and English/Romaji title
-async function searchAniListCoverAndTitle(title: string): Promise<{ coverUrl: string; englishTitle?: string }> {
-  if (!title || title.startsWith("การ์ตูนจาก")) return { coverUrl: "" };
-
-  const candidates: string[] = [];
-
-  // Extract English/Romaji substring if title contains non-ASCII and ASCII
-  const romajiMatches = title.match(/[a-zA-Z0-9\s':,-]{4,}/g);
-  if (romajiMatches) {
-    romajiMatches.forEach((rm) => {
-      const c = rm.trim();
-      if (c.length > 3) candidates.push(c);
-    });
-  }
-  candidates.push(title);
-
-  // Add variations (e.g. "Juu Kishi" -> "Juukishi", first 3-4 words)
-  const expanded: string[] = [];
-  for (const c of candidates) {
-    expanded.push(c);
-    if (c.includes("Juu Kishi")) expanded.push(c.replace(/Juu Kishi/g, "Juukishi"));
-    const words = c.split(/\s+/).filter(Boolean);
-    if (words.length >= 3) {
-      expanded.push(words.slice(0, 3).join(" "));
-      expanded.push(words.slice(0, 4).join(" "));
-    }
-  }
-
-  const uniqueCandidates = Array.from(new Set(expanded)).filter((c) => c && c.length >= 3);
-
-  for (const queryStr of uniqueCandidates.slice(0, 4)) {
-    try {
-      const aniRes = await fetch("https://graphql.anilist.co", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: `query ($search: String) { Media(search: $search, type: MANGA) { title { romaji english native } coverImage { extraLarge large } } }`,
-          variables: { search: queryStr },
-        }),
-        signal: AbortSignal.timeout(3500),
-      });
-      if (aniRes.ok) {
-        const aniData = await aniRes.json();
-        const media = aniData?.data?.Media;
-        const cover = media?.coverImage?.extraLarge || media?.coverImage?.large;
-        if (cover) {
-          const engTitle = media?.title?.english || media?.title?.romaji;
-          return { coverUrl: cover, englishTitle: engTitle };
-        }
-      }
-    } catch {}
-  }
-  return { coverUrl: "" };
-}
+import { findBestCovers } from "@/lib/cover-search";
 
 export async function POST(req: NextRequest) {
   try {
@@ -346,15 +293,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // If cover is missing or from protected domain, enrich from AniList
-    if (!coverUrl || coverUrl.includes("nobuild.pro") || !fetchSuccess) {
-      const aniResult = await searchAniListCoverAndTitle(title);
-      if (aniResult.coverUrl) {
-        coverUrl = aniResult.coverUrl;
-      }
-      if (!fetchSuccess && aniResult.englishTitle && (!title || title.startsWith("การ์ตูนจาก"))) {
-        title = aniResult.englishTitle;
-      }
+    // Check if cover image is missing, broken, or a chapter interior panel
+    const isPanelOrBroken =
+      !coverUrl ||
+      coverUrl.includes("nobuild.pro") ||
+      /(?:chapter|ep|ch|page)[-_]?\d+[-_]\(\d+\)|ep\d+[-_]\(\d+\)|\/data\/manga_.*\/.*(?:ep|ch)\d+/i.test(coverUrl);
+
+    if (isPanelOrBroken || !fetchSuccess) {
+      try {
+        const coverSearch = await findBestCovers(title);
+        if (coverSearch.bestCover) {
+          coverUrl = coverSearch.bestCover;
+        }
+        if (!fetchSuccess && coverSearch.cleanQuery && (!title || title.startsWith("การ์ตูนจาก"))) {
+          title = coverSearch.cleanQuery;
+        }
+      } catch {}
     }
 
     return NextResponse.json({

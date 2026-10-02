@@ -17,9 +17,16 @@ import {
   Plus,
   Trash2,
   Lock,
+  Sparkles,
+  Image as ImageIcon,
 } from "lucide-react";
 import { testSupabaseConnection } from "@/lib/supabase";
-import { getLocalMangas, saveLocalMangas } from "@/lib/storage";
+import {
+  getLocalMangas,
+  saveLocalMangas,
+  autoFixMissingAndBadCovers,
+  isCoverNeedingEnrichment,
+} from "@/lib/storage";
 import {
   getStoredCategories,
   addCategory,
@@ -61,6 +68,59 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     success: boolean;
     message: string;
   } | null>(null);
+
+  // Auto-Fix Covers state
+  const [isFixingCovers, setIsFixingCovers] = useState(false);
+  const [fixProgress, setFixProgress] = useState<{
+    current: number;
+    total: number;
+    title: string;
+  } | null>(null);
+  const [fixResultMsg, setFixResultMsg] = useState<{
+    text: string;
+    success: boolean;
+  } | null>(null);
+
+  const localMangas = getLocalMangas();
+  const needingFixCount = localMangas.filter((m) =>
+    isCoverNeedingEnrichment(m.cover_url)
+  ).length;
+
+  const handleStartFixCovers = async () => {
+    setIsFixingCovers(true);
+    setFixProgress(null);
+    setFixResultMsg(null);
+    try {
+      const res = await autoFixMissingAndBadCovers((current, total, title) => {
+        setFixProgress({ current, total, title });
+      });
+      if (res.updatedCount > 0) {
+        setFixResultMsg({
+          text: `🎉 ดึงรูปปก HD สำเร็จจำนวน ${res.updatedCount} เรื่อง (จากที่ตรวจพบ ${res.totalCandidates} เรื่อง)!`,
+          success: true,
+        });
+        onDataImported();
+      } else if (res.totalCandidates === 0) {
+        setFixResultMsg({
+          text: `✅ การ์ตูนทุกเรื่องในชั้นหนังสือของคุณมีรูปปก HD สวยงามครบถ้วนแล้ว`,
+          success: true,
+        });
+      } else {
+        setFixResultMsg({
+          text: `⚠️ ดึงรูปปกไม่สำเร็จ หรือเครือข่ายขัดข้อง กรุณาลองใหม่อีกครั้ง`,
+          success: false,
+        });
+      }
+    } catch (err: any) {
+      setFixResultMsg({
+        text: `❌ เกิดข้อผิดพลาด: ${err.message}`,
+        success: false,
+      });
+    } finally {
+      setIsFixingCovers(false);
+      setFixProgress(null);
+    }
+  };
 
   const handleTestConnection = async () => {
     if (!url.trim() || !anonKey.trim()) {
@@ -259,6 +319,83 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>เพิ่ม</span>
               </button>
             </div>
+          </div>
+
+          {/* Auto-Fix Covers Section */}
+          <div className="bg-gradient-to-br from-[#141E33] to-[#1a1e38] border border-violet-500/40 rounded-2xl p-4 space-y-3 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center border border-amber-500/30">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span>ดึงและแก้ไขรูปปก HD อัตโนมัติ (Auto-Fix Covers)</span>
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    ดึงรูปโปสเตอร์ HD สวยๆ จาก AniList, Kitsu, MangaDex และเน็ตมาใส่ให้อัตโนมัติ
+                  </p>
+                </div>
+              </div>
+
+              {needingFixCount > 0 ? (
+                <span className="text-[10px] text-amber-300 font-bold bg-amber-950/60 border border-amber-800/40 px-2.5 py-0.5 rounded-full animate-pulse">
+                  พบ {needingFixCount} เรื่องที่ต้องแก้ไข
+                </span>
+              ) : (
+                <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/60 border border-emerald-800/40 px-2.5 py-0.5 rounded-full">
+                  รูปปกครบทุกเรื่อง
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] text-gray-300 leading-relaxed">
+              แก้ปัญหาการ์ตูนไม่มีรูปปก หรือเรื่องที่ได้รูปจากหน้าอ่านตอนแรกมาแทนรูปปก ระบบจะสแกนและดึงรูปหน้าปกความละเอียดสูงมาใส่และบันทึกลงฐานข้อมูลให้ทันทีในคลิกเดียว
+            </p>
+
+            <button
+              type="button"
+              onClick={handleStartFixCovers}
+              disabled={isFixingCovers}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-md shadow-orange-500/20 transition active:scale-95 disabled:opacity-50"
+            >
+              {isFixingCovers ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>
+                    {fixProgress
+                      ? `กำลังดึงรูปปก (${fixProgress.current}/${fixProgress.total}): ${fixProgress.title.slice(0, 25)}...`
+                      : "กำลังประมวลผล..."}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-yellow-200 fill-yellow-200" />
+                  <span>
+                    {needingFixCount > 0
+                      ? `⚡ เริ่มดึงรูปปก HD ให้ทั้ง ${needingFixCount} เรื่องทันที`
+                      : "⚡ ตรวจสอบและดึงรูปปก HD ซ้ำอีกครั้ง"}
+                  </span>
+                </>
+              )}
+            </button>
+
+            {fixResultMsg && (
+              <div
+                className={`p-3 rounded-xl text-xs font-semibold animate-fade-in flex items-center gap-2 ${
+                  fixResultMsg.success
+                    ? "bg-emerald-950/40 border border-emerald-500/30 text-emerald-300"
+                    : "bg-rose-950/40 border border-rose-500/30 text-rose-300"
+                }`}
+              >
+                {fixResultMsg.success ? (
+                  <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                )}
+                <span>{fixResultMsg.text}</span>
+              </div>
+            )}
           </div>
 
           {/* Supabase Section */}

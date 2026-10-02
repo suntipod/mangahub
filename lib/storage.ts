@@ -769,3 +769,73 @@ export async function restoreBackupData(
   }
 }
 
+// Check if a manga cover is missing or low quality
+export function isCoverNeedingEnrichment(coverUrl?: string): boolean {
+  if (!coverUrl || coverUrl.trim() === "") return true;
+  if (coverUrl.includes("images.unsplash.com")) return true;
+  if (coverUrl.includes("nobuild.pro")) return true;
+  if (coverUrl.startsWith("data:")) return true;
+  // Panel images from chapter reader pages
+  if (
+    /(?:chapter|ep|ch|page)[-_]?\d+[-_]\(\d+\)|ep\d+[-_]\(\d+\)|\/data\/manga_.*\/.*(?:ep|ch)\d+/i.test(
+      coverUrl
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+// Auto-fix covers for all mangas in library that need better covers
+export async function autoFixMissingAndBadCovers(
+  onProgress?: (current: number, total: number, title: string) => void
+): Promise<{ updatedCount: number; totalCandidates: number; errors: number }> {
+  const currentMangas = getLocalMangas();
+  const candidates = currentMangas.filter((m) => isCoverNeedingEnrichment(m.cover_url));
+
+  if (candidates.length === 0) {
+    return { updatedCount: 0, totalCandidates: 0, errors: 0 };
+  }
+
+  let updatedCount = 0;
+  let errors = 0;
+  const updatedMangas = [...currentMangas];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const manga = candidates[i];
+    if (onProgress) {
+      onProgress(i + 1, candidates.length, manga.title);
+    }
+
+    try {
+      const res = await fetch(`/api/cover-search?title=${encodeURIComponent(manga.title)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.bestCover) {
+          const idx = updatedMangas.findIndex((m) => m.id === manga.id);
+          if (idx >= 0) {
+            const updated: Manga = {
+              ...updatedMangas[idx],
+              cover_url: json.bestCover,
+              updated_at: new Date().toISOString(),
+            };
+            updatedMangas[idx] = updated;
+            await upsertManga(updated);
+            updatedCount++;
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`Auto-fix cover failed for ${manga.title}:`, e);
+      errors++;
+    }
+
+    // Small delay between requests to be polite to external APIs
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  saveLocalMangas(updatedMangas);
+  return { updatedCount, totalCandidates: candidates.length, errors };
+}
+
+

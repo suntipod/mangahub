@@ -21,6 +21,7 @@ import {
   ClipboardPaste,
   Zap,
   Tag,
+  Sparkles,
 } from "lucide-react";
 import { computeNextChapterUrl, checkMangaOnlineUpdate } from "@/lib/storage";
 import { getStoredCategories } from "@/lib/categories";
@@ -68,6 +69,23 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
     setCoverImgError(false);
   }, [coverUrl]);
 
+// Helper to clean raw title into clean English/Romaji or pure title for search
+function getCleanCoverSearchTitle(rawTitle: string): string {
+  if (!rawTitle) return "";
+  const enMatch = rawTitle.match(/[a-zA-Z0-9\s':,-]{3,}/g);
+  if (enMatch && enMatch[0].trim().length >= 3) {
+    return enMatch[0].replace(/[-_:]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  return rawTitle
+    .replace(/(?:ตอนที่|ch|chapter|ep|episode)\s*\d+(?:\.\d+)?/gi, "")
+    .replace(/แปลไทย|จบแล้ว|จบss\d*|มังงะออนไลน์|อ่านออนไลน์|มังฮวา|มังงะ/gi, "")
+    .replace(/\((?:Remake|นิยาย|ฉบับการ์ตูน|มังงะ)[^)]*\)/gi, "")
+    .replace(/[-–|•]\s*[\w\s.-]+(?:com|net|org|xyz|to|in|co|app)\s*$/gi, "")
+    .replace(/[-_:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
   // Synchronize state when manga prop changes
   useEffect(() => {
     if (manga) {
@@ -81,12 +99,19 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       setCoverUrl(manga.cover_url || "");
       setDisplayCover(manga.cover_url || "");
       setLatestChapter(manga.latest_available_chapter);
-      setSearchCoverQuery(manga.title);
+      setSearchCoverQuery(getCleanCoverSearchTitle(manga.title));
     }
   }, [manga]);
 
-  const [searchCoverQuery, setSearchCoverQuery] = useState(manga.title);
+  const [searchCoverQuery, setSearchCoverQuery] = useState(
+    manga ? getCleanCoverSearchTitle(manga.title) : ""
+  );
   const [isSearchingCover, setIsSearchingCover] = useState(false);
+  const [isAutoFetchingCover, setIsAutoFetchingCover] = useState(false);
+  const [autoFetchMsg, setAutoFetchMsg] = useState<{
+    text: string;
+    isError?: boolean;
+  } | null>(null);
   const [coverResults, setCoverResults] = useState<
     Array<{ title: string; coverUrl: string; source: string }>
   >([]);
@@ -103,9 +128,12 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
     isError?: boolean;
   } | null>(null);
 
-  // Search official covers from AniList & MangaDex
+  // Search official covers from AniList, Kitsu, MangaDex & Web
   const handleSearchCovers = async () => {
-    const q = searchCoverQuery.trim() || manga.title;
+    const q =
+      searchCoverQuery.trim() ||
+      getCleanCoverSearchTitle(manga.title) ||
+      manga.title;
     if (!q) return;
     setIsSearchingCover(true);
     try {
@@ -118,6 +146,43 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       console.error("Cover search failed:", err);
     } finally {
       setIsSearchingCover(false);
+    }
+  };
+
+  // 1-Click Auto Fetch Best Cover
+  const handleAutoFetchCover = async () => {
+    setIsAutoFetchingCover(true);
+    setAutoFetchMsg(null);
+    try {
+      const q =
+        searchCoverQuery.trim() ||
+        getCleanCoverSearchTitle(manga.title) ||
+        manga.title;
+      const res = await fetch(`/api/cover-search?title=${encodeURIComponent(q)}`);
+      const json = await res.json();
+      if (json.success && json.bestCover) {
+        setCoverUrl(json.bestCover);
+        setDisplayCover(json.bestCover);
+        if (json.results && json.results.length > 0) {
+          setCoverResults(json.results);
+        }
+        setAutoFetchMsg({
+          text: `✨ ดึงรูปปก HD สำเร็จแล้ว! (${json.results?.[0]?.source || "ระบบ"})`,
+        });
+      } else {
+        setAutoFetchMsg({
+          text: `⚠️ ไม่พบรูปปกที่ตรงกับชื่อเรื่องนี้ ลองพิมพ์ชื่อภาษาอังกฤษในช่องค้นหาดูครับ`,
+          isError: true,
+        });
+      }
+    } catch (err: any) {
+      setAutoFetchMsg({
+        text: `❌ เกิดข้อผิดพลาดในการดึงรูปปก: ${err.message}`,
+        isError: true,
+      });
+    } finally {
+      setIsAutoFetchingCover(false);
+      setTimeout(() => setAutoFetchMsg(null), 4000);
     }
   };
 
@@ -344,35 +409,67 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 </select>
               </div>
 
-              {/* Toggle Cover Search Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  const nextState = !showCoverSearch;
-                  setShowCoverSearch(nextState);
-                  if (nextState && coverResults.length === 0) {
-                    handleSearchCovers();
-                  }
-                }}
-                className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-violet-300 hover:text-white bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/30 px-3 py-1.5 rounded-xl transition"
-              >
-                <ImageIcon className="w-3.5 h-3.5 text-violet-400" />
-                <span>{showCoverSearch ? "ซ่อนเมนูค้นหาปก" : "🖼️ ค้นหารูปปกสวยๆ HD"}</span>
-              </button>
+              {/* Cover Action Buttons */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAutoFetchCover}
+                  disabled={isAutoFetchingCover}
+                  className="flex items-center gap-1.5 text-xs font-bold text-amber-300 hover:text-white bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 hover:from-amber-500/30 border border-amber-500/40 px-3 py-1.5 rounded-xl transition active:scale-95 shadow-sm disabled:opacity-50"
+                  title="ดึงรูปปก HD ที่ดีที่สุดจากเน็ตมาใส่เรื่องนี้ทันทีโดยไม่ต้องค้นหาเอง"
+                >
+                  {isAutoFetchingCover ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400/30" />
+                  )}
+                  <span>
+                    {isAutoFetchingCover ? "กำลังดึงรูปปก..." : "⚡ ดึงรูปปก HD อัตโนมัติ"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextState = !showCoverSearch;
+                    setShowCoverSearch(nextState);
+                    if (nextState && coverResults.length === 0) {
+                      handleSearchCovers();
+                    }
+                  }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-violet-300 hover:text-white bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/30 px-3 py-1.5 rounded-xl transition"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-violet-400" />
+                  <span>{showCoverSearch ? "ซ่อนเมนูค้นหาปก" : "🖼️ เลือกรูปปกเอง"}</span>
+                </button>
+              </div>
+
+              {/* Auto Fetch Feedback Message */}
+              {autoFetchMsg && (
+                <div
+                  className={`mt-2 p-2 rounded-xl text-xs font-semibold animate-fade-in ${
+                    autoFetchMsg.isError
+                      ? "bg-rose-950/40 border border-rose-500/30 text-rose-300"
+                      : "bg-emerald-950/40 border border-emerald-500/30 text-emerald-300"
+                  }`}
+                >
+                  {autoFetchMsg.text}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Cover Search Box (AniList + MangaDex) */}
+          {/* Cover Search Box (AniList + Kitsu + MangaDex + Web) */}
           {showCoverSearch && (
             <div className="bg-[#141E33] border border-violet-500/40 rounded-2xl p-4 space-y-3 animate-fade-in">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
                     <ImageIcon className="w-4 h-4 text-violet-400" />
-                    <span>ค้นหารูปปกสวยๆ จาก AniList & MangaDex</span>
+                    <span>ค้นหารูปปกสวยๆ จาก AniList, Kitsu, MangaDex & Web HD</span>
                   </h4>
                   <p className="text-[11px] text-gray-400 mt-0.5">
-                    แตะที่รูปเพื่อเปลี่ยนรูปปกของการ์ตูนเรื่องนี้ทันที
+                    แตะที่รูปเพื่อเลือกเป็นภาพปกของการ์ตูนเรื่องนี้ทันที
                   </p>
                 </div>
               </div>
@@ -383,7 +480,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                   value={searchCoverQuery}
                   onChange={(e) => setSearchCoverQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSearchCovers()}
-                  placeholder="พิมพ์ชื่อเรื่องภาษาอังกฤษหรือเกาหลี..."
+                  placeholder="พิมพ์ชื่อเรื่องภาษาอังกฤษหรือคำค้นหา..."
                   className="flex-1 bg-[#0B0F19] border border-[#1F2E45] rounded-xl px-3 py-2 text-xs text-gray-200 outline-none focus:border-violet-500 placeholder-gray-500"
                 />
                 <button
@@ -424,7 +521,17 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                           <Check className="w-6 h-6 text-emerald-400 drop-shadow-md" />
                         </div>
                       )}
-                      <span className="absolute bottom-1 left-1 right-1 text-[9px] bg-black/85 text-gray-200 px-1 py-0.5 rounded text-center truncate">
+                      <span
+                        className={`absolute bottom-1 left-1 right-1 text-[9px] px-1 py-0.5 rounded text-center truncate font-bold shadow ${
+                          r.source.includes("AniList")
+                            ? "bg-blue-950/90 text-blue-200 border border-blue-700/50"
+                            : r.source.includes("Kitsu")
+                            ? "bg-purple-950/90 text-purple-200 border border-purple-700/50"
+                            : r.source.includes("MangaDex")
+                            ? "bg-orange-950/90 text-orange-200 border border-orange-700/50"
+                            : "bg-emerald-950/90 text-emerald-200 border border-emerald-700/50"
+                        }`}
+                      >
                         {r.source}
                       </span>
                     </div>

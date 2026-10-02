@@ -16,6 +16,7 @@ import {
   syncWithServer,
   checkMangaOnlineUpdate,
   touchMangaRead,
+  autoFixMissingAndBadCovers,
 } from "@/lib/storage";
 import {
   loadSupabaseConfig,
@@ -50,6 +51,7 @@ import {
   X,
   Dices,
   BarChart3,
+  Loader2,
 } from "lucide-react";
 
 export default function Home() {
@@ -65,6 +67,10 @@ export default function Home() {
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [checkProgress, setCheckProgress] = useState<{ current: number; total: number } | null>(null);
   const [updateNotification, setUpdateNotification] = useState<string | null>(null);
+
+  // Auto-Fix All Covers State
+  const [isFixingAllCovers, setIsFixingAllCovers] = useState(false);
+  const [fixCoverProgress, setFixCoverProgress] = useState<{ current: number; total: number; title: string } | null>(null);
 
   // Filters & Search
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -329,6 +335,34 @@ export default function Home() {
     setTimeout(() => {
       setUpdateNotification(null);
     }, 6000);
+  };
+
+  // Batch Auto-Fix All Covers in Library
+  const handleAutoFixAllCovers = async () => {
+    if (isFixingAllCovers || mangas.length === 0) return;
+    setIsFixingAllCovers(true);
+    setFixCoverProgress(null);
+    setUpdateNotification("🔍 กำลังค้นหาและดึงรูปปก HD สำหรับเรื่องที่ยังไม่มีปก...");
+    try {
+      const res = await autoFixMissingAndBadCovers((current, total, title) => {
+        setFixCoverProgress({ current, total, title });
+      });
+      const updatedList = getLocalMangas();
+      setMangas(updatedList);
+      if (res.updatedCount > 0) {
+        setUpdateNotification(`🎉 ดึงรูปปก HD สำเร็จจำนวน ${res.updatedCount} เรื่อง!`);
+      } else if (res.totalCandidates === 0) {
+        setUpdateNotification(`✅ ทุกเรื่องในชั้นหนังสือของคุณมีรูปปก HD สวยงามครบถ้วนแล้ว`);
+      } else {
+        setUpdateNotification(`⚠️ ตรวจสอบเรียบร้อย ไม่พบรูปปกใหม่เพิ่มเติม`);
+      }
+    } catch (e: any) {
+      setUpdateNotification(`❌ เกิดข้อผิดพลาดในการดึงรูปปก: ${e.message}`);
+    } finally {
+      setIsFixingAllCovers(false);
+      setFixCoverProgress(null);
+      setTimeout(() => setUpdateNotification(null), 6000);
+    }
   };
 
   // Add new manga
@@ -627,6 +661,25 @@ export default function Home() {
                 {isCheckingUpdates && checkProgress
                   ? `ตรวจ ${checkProgress.current}/${checkProgress.total}...`
                   : "ตรวจหาตอนใหม่"}
+              </span>
+            </button>
+
+            {/* Auto-Fix Covers Button */}
+            <button
+              onClick={handleAutoFixAllCovers}
+              disabled={isFixingAllCovers}
+              className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 hover:from-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              title="ดึงรูปปก HD สวยๆ จากเน็ตมาใส่ให้ทุกเรื่องที่ไม่มีรูปปก หรือภาพปกไม่ชัด"
+            >
+              {isFixingAllCovers ? (
+                <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+              ) : (
+                <Sparkles className="w-4 h-4 text-amber-400 fill-amber-400/20" />
+              )}
+              <span>
+                {isFixingAllCovers && fixCoverProgress
+                  ? `ดึงปก ${fixCoverProgress.current}/${fixCoverProgress.total}...`
+                  : "🎨 ดึงรูปปก HD"}
               </span>
             </button>
 
