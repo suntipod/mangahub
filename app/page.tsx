@@ -31,6 +31,8 @@ import { MangaDetailModal } from "@/components/MangaDetailModal";
 import { AddMangaModal } from "@/components/AddMangaModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { BackupModal } from "@/components/BackupModal";
+import { ReadingStatsModal } from "@/components/ReadingStatsModal";
+import { RandomPickerModal } from "@/components/RandomPickerModal";
 import {
   BookOpen,
   Plus,
@@ -46,6 +48,8 @@ import {
   Zap,
   Tag,
   X,
+  Dices,
+  BarChart3,
 } from "lucide-react";
 
 export default function Home() {
@@ -109,6 +113,8 @@ export default function Home() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [isRandomOpen, setIsRandomOpen] = useState(false);
 
   // Cloud Sync state
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>("syncing");
@@ -541,6 +547,8 @@ export default function Home() {
         onSync={handleSync}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenBackup={() => setIsBackupOpen(true)}
+        onOpenStats={() => setIsStatsOpen(true)}
+        onOpenRandom={() => setIsRandomOpen(true)}
         onOpenAdd={() => setIsAddOpen(true)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -587,11 +595,31 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            {/* Random Picker Button */}
+            <button
+              onClick={() => setIsRandomOpen(true)}
+              className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              title="สุ่มการ์ตูน Tier S/A ที่ดองไว้มาให้อ่าน 🎲"
+            >
+              <Dices className="w-4 h-4 text-amber-400" />
+              <span>สุ่มอ่าน 🎲</span>
+            </button>
+
+            {/* Reading Stats Button */}
+            <button
+              onClick={() => setIsStatsOpen(true)}
+              className="flex items-center justify-center gap-1.5 bg-[#182338] hover:bg-[#20304c] text-violet-300 border border-violet-500/30 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              title="ดูสถิติการอ่านส่วนตัวของคุณ"
+            >
+              <BarChart3 className="w-4 h-4 text-violet-400" />
+              <span>สถิติ 📊</span>
+            </button>
+
             <button
               onClick={handleCheckAllUpdates}
               disabled={isCheckingUpdates}
-              className="flex items-center justify-center gap-1.5 bg-[#182338] hover:bg-[#20304c] text-orange-300 border border-orange-500/30 text-xs font-bold px-3.5 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              className="flex items-center justify-center gap-1.5 bg-[#182338] hover:bg-[#20304c] text-orange-300 border border-orange-500/30 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
               title="ตรวจสอบตอนใหม่ล่าสุดจากเว็บทั้งหมด"
             >
               <Flame className={`w-4 h-4 ${isCheckingUpdates ? "animate-pulse text-orange-400" : ""}`} />
@@ -604,7 +632,7 @@ export default function Home() {
 
             <button
               onClick={() => setIsAddOpen(true)}
-              className="flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition active:scale-95 shrink-0"
+              className="flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition active:scale-95 shrink-0"
             >
               <Plus className="w-4 h-4" />
               <span>กู้ชีพแท็บ Safari</span>
@@ -1109,6 +1137,8 @@ export default function Home() {
         onTabChange={(tab) => setCurrentTab(tab)}
         onOpenAdd={() => setIsAddOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenRandom={() => setIsRandomOpen(true)}
+        onOpenStats={() => setIsStatsOpen(true)}
       />
 
       {/* Modals */}
@@ -1149,7 +1179,25 @@ export default function Home() {
             setLastSyncedAt(new Date());
           }
         }}
+      />
 
+      {/* Reading Stats Modal */}
+      <ReadingStatsModal
+        isOpen={isStatsOpen}
+        onClose={() => setIsStatsOpen(false)}
+        mangas={mangas}
+        onOpenReader={handleOpenReader}
+        isDiscreetMode={isDiscreetMode}
+      />
+
+      {/* Random Picker Modal */}
+      <RandomPickerModal
+        isOpen={isRandomOpen}
+        onClose={() => setIsRandomOpen(false)}
+        mangas={mangas}
+        onOpenReader={handleOpenReader}
+        onSelectManga={(m) => setSelectedManga(m)}
+        isDiscreetMode={isDiscreetMode}
       />
     </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Cloud, CloudOff, Wifi, Flame, Loader2, Eye, EyeOff, Database } from "lucide-react";
+import { BookOpen, RefreshCw, Settings, Plus, Cloud, CloudOff, Wifi, Flame, Loader2, Eye, EyeOff, Database, Dices, BarChart3 } from "lucide-react";
 import { SupabaseConfig, CloudSyncStatus } from "@/types/manga";
 
 interface HeaderProps {
@@ -13,6 +13,8 @@ interface HeaderProps {
   onSync: () => void;
   onOpenSettings: () => void;
   onOpenBackup?: () => void;
+  onOpenStats?: () => void;
+  onOpenRandom?: () => void;
   onOpenAdd: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
@@ -32,6 +34,8 @@ export const Header: React.FC<HeaderProps> = ({
   onSync,
   onOpenSettings,
   onOpenBackup,
+  onOpenStats,
+  onOpenRandom,
   onOpenAdd,
   searchQuery,
   onSearchChange,
@@ -202,6 +206,28 @@ export const Header: React.FC<HeaderProps> = ({
             <Plus className="w-4 h-4" />
             <span>กู้ชีพแท็บ Safari</span>
           </button>
+
+          {/* Random Picker Button (วันนี้อ่านอะไรดี? 🎲) */}
+          {onOpenRandom && (
+            <button
+              onClick={onOpenRandom}
+              title="วันนี้อ่านเรื่องอะไรดี? (สุ่มการ์ตูนเด็ดมาให้อ่าน 🎲)"
+              className="p-2.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 border border-amber-500/40 text-amber-300 hover:text-amber-200 transition active:scale-95"
+            >
+              <Dices className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Reading Stats Button (สถิติการอ่าน 📊) */}
+          {onOpenStats && (
+            <button
+              onClick={onOpenStats}
+              title="สถิติการอ่านส่วนตัว (Reading Stats 📊)"
+              className="p-2.5 rounded-xl bg-violet-950/40 hover:bg-violet-900/50 border border-violet-500/40 text-violet-300 hover:text-violet-200 transition active:scale-95"
+            >
+              <BarChart3 className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Backup & Restore JSON Button */}
           {onOpenBackup && (

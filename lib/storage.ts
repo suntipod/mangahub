@@ -459,6 +459,53 @@ export async function upsertMangas(mangasToAdd: Manga[]): Promise<Manga[]> {
   return newList;
 }
 
+export interface ReadLogEntry {
+  manga_id: string;
+  title: string;
+  chapter: number;
+  delta: number;
+  type: 'increment' | 'open' | 'sync';
+  timestamp: string;
+}
+
+// Record reading activity event in localStorage
+export function recordReadEvent(
+  mangaId: string,
+  title: string,
+  chapter: number,
+  delta: number = 1,
+  type: 'increment' | 'open' | 'sync' = 'increment'
+) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem("mangahub_read_logs");
+    const logs: ReadLogEntry[] = raw ? JSON.parse(raw) : [];
+    logs.unshift({
+      manga_id: mangaId,
+      title,
+      chapter,
+      delta,
+      type,
+      timestamp: new Date().toISOString(),
+    });
+    if (logs.length > 500) logs.length = 500;
+    localStorage.setItem("mangahub_read_logs", JSON.stringify(logs));
+  } catch (e) {
+    console.warn("Failed to save read log:", e);
+  }
+}
+
+// Get all recorded read activity logs
+export function getReadLogs(): ReadLogEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem("mangahub_read_logs");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
 // Quick increment chapter (+1)
 export async function incrementChapter(id: string): Promise<Manga[]> {
   const current = getLocalMangas();
@@ -481,6 +528,7 @@ export async function incrementChapter(id: string): Promise<Manga[]> {
 
   if (typeof window !== "undefined") {
     localStorage.setItem("mangahub_last_read_manga_id", id);
+    recordReadEvent(id, target.title, nextChapter, 1, 'increment');
   }
 
   return upsertManga(updated);
@@ -495,6 +543,7 @@ export async function touchMangaRead(id: string): Promise<Manga[]> {
   const now = new Date().toISOString();
   if (typeof window !== "undefined") {
     localStorage.setItem("mangahub_last_read_manga_id", id);
+    recordReadEvent(id, target.title, target.current_chapter, 0, 'open');
   }
 
   const updated: Manga = {
@@ -527,6 +576,8 @@ export async function setChapter(id: string, chapterNumber: number): Promise<Man
 
   if (typeof window !== "undefined") {
     localStorage.setItem("mangahub_last_read_manga_id", id);
+    const diff = Math.max(0, chapterNumber - target.current_chapter);
+    recordReadEvent(id, target.title, chapterNumber, diff, 'sync');
   }
 
   return upsertManga(updated);
