@@ -20,6 +20,7 @@ import {
   Search,
   ClipboardPaste,
   Zap,
+  Tag,
 } from "lucide-react";
 import { computeNextChapterUrl, checkMangaOnlineUpdate } from "@/lib/storage";
 import { getStoredCategories } from "@/lib/categories";
@@ -43,6 +44,8 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [status, setStatus] = useState<ReadingStatus>(manga.status);
   const [tier, setTier] = useState<TierRating>(manga.tier);
   const [category, setCategory] = useState<string>(manga.category || "การ์ตูนทั่วไป");
+  const [tags, setTags] = useState<string[]>(manga.tags || []);
+  const [newTagInput, setNewTagInput] = useState("");
   const [availableCategories] = useState<string[]>(getStoredCategories());
   const [notes, setNotes] = useState(manga.notes || "");
   const [sources, setSources] = useState<MangaSource[]>(manga.sources);
@@ -51,6 +54,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [showAddSource, setShowAddSource] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
 
   // Cover image states
   const [coverUrl, setCoverUrl] = useState(manga.cover_url || "");
@@ -71,6 +75,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       setStatus(manga.status);
       setTier(manga.tier);
       setCategory(manga.category || "การ์ตูนทั่วไป");
+      setTags(manga.tags || []);
       setNotes(manga.notes || "");
       setSources(manga.sources || []);
       setCoverUrl(manga.cover_url || "");
@@ -218,6 +223,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       status,
       tier,
       category,
+      tags,
       notes,
       sources,
       last_read_at: new Date().toISOString(),
@@ -300,11 +306,13 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                   onChange={(e) => setStatus(e.target.value as ReadingStatus)}
                   className="bg-[#182338] border border-[#233554] text-xs font-semibold rounded-xl px-2.5 py-1.5 text-gray-200 outline-none"
                 >
-                  <option value="reading">🟢 กำลังอ่าน</option>
-                  <option value="on_hold">🟡 ดองไว้ก่อน</option>
-                  <option value="completed">🔵 อ่านจบแล้ว</option>
-                  <option value="plan_to_read">⚪ มีแผนจะอ่าน</option>
+                  <option value="reading">📖 กำลังอ่าน</option>
+                  <option value="on_hold">⏳ ดองไว้รอตอนเยอะ</option>
+                  <option value="completed">✅ อ่านจบแล้ว</option>
+                  <option value="dropped">🛑 เท / เลิกอ่าน</option>
+                  <option value="plan_to_read">📌 มีแผนจะอ่าน</option>
                 </select>
+
 
                 <select
                   value={tier}
@@ -680,8 +688,105 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
             )}
           </div>
 
+          {/* Custom Tags Section */}
+          <div className="bg-[#141E33] border border-[#1F2E45] rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-cyan-400" />
+                <span>แท็กส่วนตัว (Custom Tags)</span>
+              </label>
+              <span className="text-[10px] text-gray-400">ใช้ค้นหาหรือกรองแนวเรื่อง</span>
+            </div>
+
+            {/* Existing Tags Chips */}
+            <div className="flex flex-wrap gap-1.5 min-h-[28px]">
+              {tags.length > 0 ? (
+                tags.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-1 bg-cyan-950/50 border border-cyan-700/50 text-cyan-300 text-xs px-2.5 py-1 rounded-xl font-medium"
+                  >
+                    <span>#{t}</span>
+                    <button
+                      type="button"
+                      onClick={() => setTags(tags.filter((item) => item !== t))}
+                      className="hover:text-red-400 transition ml-0.5"
+                      title="ลบแท็กนี้"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-gray-500 italic">ยังไม่มีแท็ก (เลือกจากด้านล่างหรือพิมพ์เพิ่มได้เลย)</span>
+              )}
+            </div>
+
+            {/* Add Tag Input */}
+            <div className="flex gap-2 pt-1">
+              <input
+                type="text"
+                value={newTagInput}
+                onChange={(e) => setNewTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const clean = newTagInput.trim().replace(/^#/, "");
+                    if (clean && !tags.includes(clean)) {
+                      setTags([...tags, clean]);
+                      setNewTagInput("");
+                    }
+                  }
+                }}
+                placeholder="พิมพ์แท็กใหม่ เช่น พระเอกเทพ, ทำฟาร์ม..."
+                className="flex-1 bg-[#0B0F19] border border-[#1F2E45] rounded-xl px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-cyan-500 placeholder-gray-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const clean = newTagInput.trim().replace(/^#/, "");
+                  if (clean && !tags.includes(clean)) {
+                    setTags([...tags, clean]);
+                    setNewTagInput("");
+                  }
+                }}
+                className="bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/40 text-cyan-300 font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1 active:scale-95 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>เพิ่ม</span>
+              </button>
+            </div>
+
+            {/* Quick Popular Tags */}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <span className="text-[10px] text-gray-400 self-center mr-1">แท็กแนะนำ:</span>
+              {["พระเอกเทพ", "เกิดใหม่", "ทำฟาร์ม", "ลงดันเจี้ยน", "คอมเมดี้", "ต่างโลก", "แก้แค้น", "โรแมนติก", "ดราม่า", "แฟนตาซี"].map(
+                (quickTag) => (
+                  <button
+                    key={quickTag}
+                    type="button"
+                    onClick={() => {
+                      if (!tags.includes(quickTag)) {
+                        setTags([...tags, quickTag]);
+                      }
+                    }}
+                    disabled={tags.includes(quickTag)}
+                    className={`text-[10px] px-2 py-0.5 rounded-lg border transition ${
+                      tags.includes(quickTag)
+                        ? "bg-cyan-950/20 border-cyan-900/30 text-cyan-500/50 cursor-default"
+                        : "bg-[#0E1524] border-[#1F2E45] text-gray-300 hover:text-cyan-300 hover:border-cyan-500/40 active:scale-95"
+                    }`}
+                  >
+                    +{quickTag}
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+
           {/* Notes Section */}
           <div className="space-y-1.5">
+
             <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
               บันทึกช่วยจำ (Notes)
             </label>

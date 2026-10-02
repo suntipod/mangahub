@@ -199,6 +199,7 @@ export function deduplicateMangas(mangas: Manga[]): Manga[] {
       const chosenNotes = winner.notes !== undefined ? winner.notes : loser.notes || "";
       const chosenStatus = winner.status || loser.status || "reading";
       const chosenTier = (winner.tier && winner.tier !== "none") ? winner.tier : (loser.tier || "none");
+      const chosenTags = Array.from(new Set([...(winner.tags || []), ...(loser.tags || [])]));
 
       const mergedManga: Manga = {
         ...loser,
@@ -211,11 +212,13 @@ export function deduplicateMangas(mangas: Manga[]): Manga[] {
         sources: combinedSources,
         notes: chosenNotes,
         category: chosenCategory,
+        tags: chosenTags,
         cover_url: chosenCover,
         status: chosenStatus,
         tier: chosenTier,
         updated_at: new Date(Math.max(existingTime, mTime, 0)).toISOString(),
       };
+
 
       result[existingIdx] = mergedManga;
     }

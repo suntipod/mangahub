@@ -1,4 +1,4 @@
-export type ReadingStatus = 'reading' | 'on_hold' | 'completed' | 'plan_to_read';
+export type ReadingStatus = 'reading' | 'on_hold' | 'completed' | 'dropped' | 'plan_to_read';
 
 export type TierRating = 'S' | 'A' | 'B' | 'C' | 'D' | 'none';
 
@@ -22,12 +22,14 @@ export interface Manga {
   status: ReadingStatus;
   tier: TierRating;
   category?: string;        // e.g. "การ์ตูนทั่วไป", "Dojin", "NTR"
+  tags?: string[];          // e.g. ["พระเอกเทพ", "เกิดใหม่", "ทำฟาร์ม"]
   notes?: string;
   sources: MangaSource[];
   last_read_at: string;     // ISO timestamp
   created_at: string;       // ISO timestamp
   updated_at: string;       // ISO timestamp
 }
+
 
 export const DEFAULT_CATEGORIES = [
   "การ์ตูนทั่วไป",

@@ -44,6 +44,8 @@ import {
   LayoutGrid,
   StretchHorizontal,
   Zap,
+  Tag,
+  X,
 } from "lucide-react";
 
 export default function Home() {
@@ -63,6 +65,7 @@ export default function Home() {
   // Filters & Search
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedTier, setSelectedTier] = useState<string>("all");
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [lastReadMangaId, setLastReadMangaId] = useState<string | null>(null);
   const [availableCategories, setAvailableCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [currentTab, setCurrentTab] = useState<string>("all");
@@ -443,6 +446,12 @@ export default function Home() {
         } else if (currentTab !== "all" && m.status !== currentTab) {
           return false;
         }
+        // Tag filter
+        if (selectedTag) {
+          if (!m.tags || !m.tags.includes(selectedTag)) {
+            return false;
+          }
+        }
         // Search filter
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
@@ -453,7 +462,8 @@ export default function Home() {
               s.site_name.toLowerCase().includes(q) ||
               s.base_url.toLowerCase().includes(q)
           );
-          if (!matchTitle && !matchAlt && !matchSources) return false;
+          const matchTags = m.tags?.some((t) => t.toLowerCase().includes(q));
+          if (!matchTitle && !matchAlt && !matchSources && !matchTags) return false;
         }
         return true;
       })
@@ -469,7 +479,7 @@ export default function Home() {
         }
         return 0;
       });
-  }, [mangas, selectedCategory, selectedTier, currentTab, searchQuery, sortBy]);
+  }, [mangas, selectedCategory, selectedTier, selectedTag, currentTab, searchQuery, sortBy]);
 
   // Counts for status tabs (respecting selectedCategory)
   const categoryScopedMangas = useMemo(() => {
@@ -484,6 +494,26 @@ export default function Home() {
   const readingCount = categoryScopedMangas.filter((m) => m.status === "reading").length;
   const onHoldCount = categoryScopedMangas.filter((m) => m.status === "on_hold").length;
   const completedCount = categoryScopedMangas.filter((m) => m.status === "completed").length;
+  const droppedCount = categoryScopedMangas.filter((m) => m.status === "dropped").length;
+  const planToReadCount = categoryScopedMangas.filter((m) => m.status === "plan_to_read").length;
+
+  // All unique tags with counts in current category scope
+  const allTags = useMemo(() => {
+    const tagMap = new Map<string, number>();
+    for (const m of categoryScopedMangas) {
+      if (m.tags && Array.isArray(m.tags)) {
+        for (const t of m.tags) {
+          const trimmed = t.trim();
+          if (trimmed) {
+            tagMap.set(trimmed, (tagMap.get(trimmed) || 0) + 1);
+          }
+        }
+      }
+    }
+    return Array.from(tagMap.entries())
+      .sort((a, b) => b[1] - a[1]) // Most used first
+      .map(([tag, count]) => ({ tag, count }));
+  }, [categoryScopedMangas]);
 
   const tierCounts = useMemo(() => {
     const counts = { all: 0, S: 0, A: 0, B: 0, C: 0, none: 0 };
@@ -825,6 +855,45 @@ export default function Home() {
             </button>
           </div>
 
+          {/* Tag Filter Bar */}
+          {(allTags.length > 0 || selectedTag) && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none pt-0.5">
+              <span className="text-[11px] font-bold text-gray-400 shrink-0 mr-1 flex items-center gap-1">
+                <Tag className="w-3 h-3 text-violet-400" />
+                <span>แท็ก:</span>
+              </span>
+
+              {selectedTag && (
+                <button
+                  onClick={() => setSelectedTag(null)}
+                  className="bg-violet-600 text-white text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md shadow-violet-600/30 shrink-0 animate-fade-in"
+                  title="คลิกเพื่อล้างตัวกรองแท็ก"
+                >
+                  <span>#{selectedTag}</span>
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+
+              {allTags.map(({ tag, count }) => {
+                const isSelected = selectedTag === tag;
+                return (
+                  <button
+                    key={tag}
+                    onClick={() => setSelectedTag(isSelected ? null : tag)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 flex items-center gap-1 ${
+                      isSelected
+                        ? "bg-violet-600 text-white font-bold shadow-md shadow-violet-600/30"
+                        : "bg-[#131B2E] text-violet-300 hover:text-white hover:bg-violet-950/40 border border-violet-500/20"
+                    }`}
+                  >
+                    <span>#{tag}</span>
+                    <span className="text-[10px] opacity-70">({count})</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Status Tabs & Sorting Toolbar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             {/* Status Tabs */}
@@ -890,6 +959,28 @@ export default function Home() {
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>อ่านจบ ({completedCount})</span>
               </button>
+
+              <button
+                onClick={() => setCurrentTab("dropped")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                  currentTab === "dropped"
+                    ? "bg-rose-700 text-white shadow-md shadow-rose-700/30 font-bold"
+                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                }`}
+              >
+                <span>🛑 เทแล้ว ({droppedCount})</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab("plan_to_read")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                  currentTab === "plan_to_read"
+                    ? "bg-purple-700 text-white shadow-md shadow-purple-700/30 font-bold"
+                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                }`}
+              >
+                <span>📌 อยากอ่าน ({planToReadCount})</span>
+              </button>
             </div>
 
             {/* View Mode & Sort Selector Toolbar */}
@@ -952,6 +1043,7 @@ export default function Home() {
                 onIncrement={handleIncrementChapter}
                 onSyncToLatest={handleSyncToLatest}
                 onOpenReader={handleOpenReader}
+                onTagClick={(tag) => setSelectedTag(selectedTag === tag ? null : tag)}
               />
             ))}
           </div>
@@ -965,6 +1057,8 @@ export default function Home() {
               <h3 className="text-base font-bold text-white">
                 {currentTab === "has_update"
                   ? "ยังไม่มีตอนใหม่ที่รออ่านในขณะนี้"
+                  : selectedTag
+                  ? `ไม่พบการ์ตูนที่มีแท็ก #${selectedTag}`
                   : searchQuery
                   ? "ไม่พบการ์ตูนที่ค้นหา"
                   : "ยังไม่มีการ์ตูนในหมวดนี้"}
@@ -972,11 +1066,21 @@ export default function Home() {
               <p className="text-xs text-gray-400 max-w-sm mt-1">
                 {currentTab === "has_update"
                   ? "คุณอ่านทันทุกตอนแล้ว! กดปุ่ม 'ตรวจหาตอนใหม่' เพื่อสแกนเว็บต้นทางอีกครั้งได้ทุกเมื่อ"
+                  : selectedTag
+                  ? `ไม่มีเรื่องที่ติดแท็ก #${selectedTag} ลองคลิกแท็กอื่น หรือกดปุ่มด้านล่างเพื่อล้างแท็ก`
                   : searchQuery
                   ? `ไม่พบเรื่องที่ตรงกับ "${searchQuery}" ลองค้นหาด้วยคำอื่น หรือกดเพิ่มเรื่องใหม่`
                   : "เริ่มต้นโดยการกดปุ่ม 'กู้ชีพแท็บ' เพื่อวางลิงก์จากแท็บการ์ตูนที่คุณกำลังอ่านอยู่ได้เลย"}
               </p>
             </div>
+            {selectedTag && (
+              <button
+                onClick={() => setSelectedTag(null)}
+                className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow shadow-violet-600/30"
+              >
+                ล้างตัวกรองแท็ก (#{selectedTag})
+              </button>
+            )}
             {currentTab === "has_update" ? (
               <button
                 onClick={handleCheckAllUpdates}

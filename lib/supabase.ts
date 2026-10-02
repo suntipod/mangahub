@@ -97,23 +97,44 @@ export async function testSupabaseConnection(url: string, anonKey: string): Prom
   }
 }
 
-// Helpers to preserve manga category in Supabase notes field safely
-export function decodeNotesAndCategory(rawNotes?: string): { notes: string; category: string } {
-  if (!rawNotes) return { notes: "", category: "การ์ตูนทั่วไป" };
-  const match = rawNotes.match(/^\[category:([^\]]+)\]\s*([\s\S]*)/i);
-  if (match) {
-    return {
-      category: match[1].trim() || "การ์ตูนทั่วไป",
-      notes: match[2].trim(),
-    };
+// Helpers to preserve manga category & tags in Supabase notes field safely
+export function decodeNotesAndCategory(rawNotes?: string): { notes: string; category: string; tags: string[] } {
+  if (!rawNotes) return { notes: "", category: "การ์ตูนทั่วไป", tags: [] };
+  let category = "การ์ตูนทั่วไป";
+  let tags: string[] = [];
+  let remaining = rawNotes;
+
+  const catMatch = remaining.match(/\[category:([^\]]+)\]/i);
+  if (catMatch) {
+    category = catMatch[1].trim() || "การ์ตูนทั่วไป";
+    remaining = remaining.replace(catMatch[0], "");
   }
-  return { notes: rawNotes.trim(), category: "การ์ตูนทั่วไป" };
+
+  const tagMatch = remaining.match(/\[tags:([^\]]+)\]/i);
+  if (tagMatch) {
+    tags = tagMatch[1]
+      .split(",")
+      .map((t) => t.trim().replace(/^#/, ""))
+      .filter(Boolean);
+    remaining = remaining.replace(tagMatch[0], "");
+  }
+
+  return {
+    category,
+    tags,
+    notes: remaining.trim(),
+  };
 }
 
-export function encodeNotesWithCategory(notes?: string, category?: string): string {
+export function encodeNotesWithCategory(notes?: string, category?: string, tags?: string[]): string {
   const cat = category || "การ์ตูนทั่วไป";
-  const cleanNotes = (notes || "").replace(/^\[category:[^\]]+\]\s*/i, "").trim();
-  return `[category:${cat}] ${cleanNotes}`.trim();
+  const cleanNotes = (notes || "")
+    .replace(/\[category:[^\]]+\]\s*/gi, "")
+    .replace(/\[tags:[^\]]+\]\s*/gi, "")
+    .trim();
+  const cleanTags = (tags || []).map((t) => t.trim().replace(/^#/, "")).filter(Boolean);
+  const tagStr = cleanTags.length > 0 ? ` [tags:${cleanTags.join(",")}]` : "";
+  return `[category:${cat}]${tagStr} ${cleanNotes}`.trim();
 }
 
 // Fetch all mangas and their sources from Supabase
@@ -148,7 +169,7 @@ export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]
   });
 
   return mangasData.map((m: any) => {
-    const { notes: decodedNotes, category: decodedCat } = decodeNotesAndCategory(m.notes);
+    const { notes: decodedNotes, category: decodedCat, tags: decodedTags } = decodeNotesAndCategory(m.notes);
     return {
       id: m.id,
       title: m.title,
@@ -159,6 +180,7 @@ export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]
       status: m.status,
       tier: m.tier || "none",
       category: m.category || decodedCat,
+      tags: m.tags || decodedTags,
       notes: decodedNotes,
       sources: sourcesByMangaId.get(m.id) || [],
       last_read_at: m.last_read_at,
@@ -171,13 +193,14 @@ export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]
 // Upsert manga and sources to Supabase
 export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): Promise<void> {
   const mangaId = ensureUUID(manga.id);
-  const encodedNotes = encodeNotesWithCategory(manga.notes, manga.category);
+  const encodedNotes = encodeNotesWithCategory(manga.notes, manga.category, manga.tags);
 
   const { error: mError } = await client.from("mangas").upsert({
     id: mangaId,
     title: manga.title,
     alt_title: manga.alt_title,
     cover_url: manga.cover_url?.trim() || null,
+
     current_chapter: manga.current_chapter,
     latest_available_chapter: manga.latest_available_chapter,
     status: manga.status,

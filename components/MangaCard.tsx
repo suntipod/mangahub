@@ -10,6 +10,7 @@ interface MangaCardProps {
   onIncrement: (id: string) => void;
   onSyncToLatest?: (id: string, latestChapter: number) => void;
   onOpenReader?: (manga: Manga) => void;
+  onTagClick?: (tag: string) => void;
   isRecentlyRead?: boolean;
   viewMode?: "poster" | "compact";
   isDiscreetMode?: boolean;
@@ -21,10 +22,12 @@ export const MangaCard: React.FC<MangaCardProps> = ({
   onIncrement,
   onSyncToLatest,
   onOpenReader,
+  onTagClick,
   isRecentlyRead = false,
   viewMode = "poster",
   isDiscreetMode = false,
 }) => {
+
   const [justIncremented, setJustIncremented] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [currentCover, setCurrentCover] = useState(manga.cover_url || "");
@@ -208,8 +211,32 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                   : manga.tier}
               </span>
             )}
+
+            {/* Reading Status Badge if not reading */}
+            {manga.status && manga.status !== "reading" && (
+              <span
+                className={`backdrop-blur-md text-[9px] font-black px-1.5 py-0.5 rounded-md shadow ${
+                  manga.status === "completed"
+                    ? "bg-blue-600 text-white shadow-blue-600/30"
+                    : manga.status === "on_hold"
+                    ? "bg-amber-600 text-white shadow-amber-600/30"
+                    : manga.status === "dropped"
+                    ? "bg-rose-700 text-white shadow-rose-700/30"
+                    : "bg-gray-700 text-gray-200"
+                }`}
+              >
+                {manga.status === "completed"
+                  ? "✅ จบ"
+                  : manga.status === "on_hold"
+                  ? "⏳ ดอง"
+                  : manga.status === "dropped"
+                  ? "🛑 เท"
+                  : "📌 รอ"}
+              </span>
+            )}
           </div>
         </div>
+
 
         {/* Bottom Dark Gradient & Title (ตรงกับรูปตัวอย่าง) */}
         <div className="relative z-10 pt-16 pb-3 px-3 bg-gradient-to-t from-black via-black/85 to-transparent flex flex-col justify-end">
@@ -235,6 +262,30 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             <p className="text-[10px] text-gray-300 line-clamp-1 mt-0.5 opacity-90 drop-shadow">
               {manga.alt_title}
             </p>
+          )}
+
+          {/* Tags */}
+          {manga.tags && manga.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5 pointer-events-auto">
+              {manga.tags.slice(0, 3).map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTagClick?.(tag);
+                  }}
+                  className="text-[9px] font-medium bg-black/60 hover:bg-violet-600/80 text-violet-300 hover:text-white px-1.5 py-0.5 rounded border border-violet-500/20 transition-colors"
+                >
+                  #{tag}
+                </button>
+              ))}
+              {manga.tags.length > 3 && (
+                <span className="text-[9px] text-gray-400 self-center">
+                  +{manga.tags.length - 3}
+                </span>
+              )}
+            </div>
           )}
 
           {/* Quick Action Overlay (อ่านต่อ & +1) */}
@@ -429,13 +480,60 @@ export const MangaCard: React.FC<MangaCardProps> = ({
       {/* Card Body */}
       <div className="p-3.5 flex-1 flex flex-col justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-100 line-clamp-2 leading-snug group-hover:text-violet-300 transition-colors">
-            {manga.title}
-          </h3>
+          <div className="flex items-start justify-between gap-1.5">
+            <h3 className="text-sm font-semibold text-gray-100 line-clamp-2 leading-snug group-hover:text-violet-300 transition-colors">
+              {manga.title}
+            </h3>
+            {manga.status && manga.status !== "reading" && (
+              <span
+                className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-md shadow ${
+                  manga.status === "completed"
+                    ? "bg-blue-600 text-white"
+                    : manga.status === "on_hold"
+                    ? "bg-amber-600 text-white"
+                    : manga.status === "dropped"
+                    ? "bg-rose-700 text-white"
+                    : "bg-gray-700 text-gray-200"
+                }`}
+              >
+                {manga.status === "completed"
+                  ? "✅ จบ"
+                  : manga.status === "on_hold"
+                  ? "⏳ ดอง"
+                  : manga.status === "dropped"
+                  ? "🛑 เท"
+                  : "📌 รอ"}
+              </span>
+            )}
+          </div>
           {manga.alt_title && (
             <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">
               {manga.alt_title}
             </p>
+          )}
+
+          {/* Tags */}
+          {manga.tags && manga.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {manga.tags.slice(0, 3).map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTagClick?.(tag);
+                  }}
+                  className="text-[9px] font-medium bg-[#1F2E45]/80 hover:bg-violet-600/80 text-violet-300 hover:text-white px-1.5 py-0.5 rounded border border-violet-500/20 transition-colors"
+                >
+                  #{tag}
+                </button>
+              ))}
+              {manga.tags.length > 3 && (
+                <span className="text-[9px] text-gray-400 self-center">
+                  +{manga.tags.length - 3}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
