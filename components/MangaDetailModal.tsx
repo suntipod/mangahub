@@ -588,12 +588,30 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
               </button>
             </div>
 
+            {/* Quick Button to Open Next Chapter (+1 & Read) */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextCh = currentChapter + 1;
+                handleChapterChange(nextCh);
+                const primary = sources.find((s) => s.is_primary) || sources[0];
+                if (primary) {
+                  const nextUrl = computeNextChapterUrl(primary.current_chapter_url || primary.base_url, nextCh);
+                  window.open(nextUrl, "_blank", "noopener,noreferrer");
+                }
+              }}
+              className="w-full mt-3 flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/30 transition active:scale-98"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>เปิดอ่านตอนถัดไป (ช.{currentChapter + 1}) ทันที 🚀</span>
+            </button>
+
             {/* Quick Button to Jump to Latest Available Chapter */}
             {latestChapter !== undefined && latestChapter > currentChapter && (
               <button
                 type="button"
                 onClick={() => handleChapterChange(latestChapter)}
-                className="w-full mt-3 flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 hover:from-amber-500/30 border border-orange-500/40 rounded-xl text-xs font-bold text-orange-300 hover:text-white transition active:scale-98 shadow-sm"
+                className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 hover:from-amber-500/30 border border-orange-500/40 rounded-xl text-xs font-bold text-orange-300 hover:text-white transition active:scale-98 shadow-sm"
               >
                 <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
                 <span>

@@ -10,6 +10,7 @@ import {
   upsertManga,
   upsertMangas,
   incrementChapter,
+  incrementAndOpenNextChapter,
   setChapter,
   removeManga,
   syncWithSupabase,
@@ -397,6 +398,20 @@ export default function Home() {
     });
   };
 
+  // Smart +1 & Open Next Chapter
+  const handleIncrementAndOpenNext = async (manga: Manga) => {
+    setLastReadMangaId(manga.id);
+    await trackSyncMutation(async () => {
+      const { updatedList, nextUrl, nextChapter } = await incrementAndOpenNextChapter(manga.id);
+      setMangas(updatedList);
+      if (nextUrl) {
+        window.open(nextUrl, "_blank", "noopener,noreferrer");
+      } else {
+        handleOpenReader(manga);
+      }
+    });
+  };
+
   // Quick Sync to latest available chapter
   const handleSyncToLatest = async (id: string, latestChapter: number) => {
     await trackSyncMutation(async () => {
@@ -508,6 +523,14 @@ export default function Home() {
         return true;
       })
       .sort((a, b) => {
+        // When in has_update tab, prioritize highest unread backlog chapters first
+        if (currentTab === "has_update") {
+          const backlogA = (a.latest_available_chapter || a.current_chapter) - a.current_chapter;
+          const backlogB = (b.latest_available_chapter || b.current_chapter) - b.current_chapter;
+          if (backlogB !== backlogA) {
+            return backlogB - backlogA;
+          }
+        }
         if (sortBy === "recent") {
           return new Date(b.last_read_at).getTime() - new Date(a.last_read_at).getTime();
         }
@@ -664,6 +687,26 @@ export default function Home() {
               </span>
             </button>
 
+            {/* Quick Unread Backlog Filter Button */}
+            {updatesCount > 0 && (
+              <button
+                onClick={() => setCurrentTab(currentTab === "has_update" ? "all" : "has_update")}
+                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold transition active:scale-95 shadow-lg shrink-0 ${
+                  currentTab === "has_update"
+                    ? "bg-gradient-to-r from-orange-500 to-rose-600 text-white ring-2 ring-orange-400 shadow-orange-500/40"
+                    : "bg-orange-950/40 hover:bg-orange-900/50 text-orange-300 border border-orange-600/50 animate-pulse shadow-orange-950/30"
+                }`}
+                title="คลิกเพื่อกรองดูเฉพาะเรื่องที่มีตอนใหม่อ่านค้างอยู่ (เรียงตามตอนที่ดองไว้มากสุด)"
+              >
+                <Flame className="w-4 h-4 text-orange-400 fill-orange-400" />
+                <span>
+                  {currentTab === "has_update"
+                    ? `กำลังดูตอนค้าง (${updatesCount})`
+                    : `มีตอนใหม่ (${updatesCount})`}
+                </span>
+              </button>
+            )}
+
             {/* Auto-Fix Covers Button */}
             <button
               onClick={handleAutoFixAllCovers}
@@ -786,11 +829,11 @@ export default function Home() {
             </div>
 
             {/* Right side: Quick Action Buttons */}
-            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end flex-wrap">
               <button
                 onClick={() => handleIncrementChapter(recentlyReadManga.id)}
                 className="px-3 py-2 bg-[#182338] hover:bg-[#223250] text-gray-200 border border-[#27385a] rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1 shrink-0"
-                title="เพิ่มเลขตอนที่อ่าน +1 ตอน"
+                title="เพิ่มเลขตอนที่อ่าน +1 ตอน (ไม่ออกไปหน้าเว็บ)"
               >
                 <Plus className="w-3.5 h-3.5 text-violet-400" />
                 <span>+1 ตอน</span>
@@ -798,10 +841,20 @@ export default function Home() {
 
               <button
                 onClick={() => handleOpenReader(recentlyReadManga)}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-violet-600/30 transition active:scale-95"
+                className="px-3.5 py-2 bg-[#182338] hover:bg-[#223250] text-gray-200 border border-[#27385a] rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1.5 shrink-0"
+                title={`อ่านตอนปัจจุบัน (ตอนที่ ${recentlyReadManga.current_chapter})`}
+              >
+                <BookOpen className="w-3.5 h-3.5 text-violet-400" />
+                <span>ช.{recentlyReadManga.current_chapter}</span>
+              </button>
+
+              <button
+                onClick={() => handleIncrementAndOpenNext(recentlyReadManga)}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-emerald-600/30 transition active:scale-95"
+                title={`อ่านตอนถัดไป: อัปเดตเป็นตอนที่ ${recentlyReadManga.current_chapter + 1} และเปิดหน้าเว็บทันที`}
               >
                 <Zap className="w-4 h-4 fill-current text-amber-300" />
-                <span>อ่านต่อตอนที่ {recentlyReadManga.current_chapter} ⚡</span>
+                <span>อ่านตอนที่ {recentlyReadManga.current_chapter + 1} 🚀</span>
               </button>
             </div>
           </div>
@@ -1122,6 +1175,7 @@ export default function Home() {
                 isRecentlyRead={manga.id === recentlyReadManga?.id}
                 onSelect={(m) => setSelectedManga(m)}
                 onIncrement={handleIncrementChapter}
+                onIncrementAndOpenNext={handleIncrementAndOpenNext}
                 onSyncToLatest={handleSyncToLatest}
                 onOpenReader={handleOpenReader}
                 onTagClick={(tag) => setSelectedTag(selectedTag === tag ? null : tag)}
@@ -1146,13 +1200,29 @@ export default function Home() {
               </h3>
               <p className="text-xs text-gray-400 max-w-sm mt-1">
                 {currentTab === "has_update"
-                  ? "คุณอ่านทันทุกตอนแล้ว! กดปุ่ม 'ตรวจหาตอนใหม่' เพื่อสแกนเว็บต้นทางอีกครั้งได้ทุกเมื่อ"
+                  ? "คุณอ่านทันทุกตอนแล้ว! กดปุ่มด้านล่างเพื่อตรวจหาตอนใหม่ล่าสุดจากเว็บอ่านการ์ตูน"
                   : selectedTag
                   ? `ไม่มีเรื่องที่ติดแท็ก #${selectedTag} ลองคลิกแท็กอื่น หรือกดปุ่มด้านล่างเพื่อล้างแท็ก`
                   : searchQuery
                   ? `ไม่พบเรื่องที่ตรงกับ "${searchQuery}" ลองค้นหาด้วยคำอื่น หรือกดเพิ่มเรื่องใหม่`
                   : "เริ่มต้นโดยการกดปุ่ม 'กู้ชีพแท็บ' เพื่อวางลิงก์จากแท็บการ์ตูนที่คุณกำลังอ่านอยู่ได้เลย"}
               </p>
+              {currentTab === "has_update" && (
+                <div className="pt-3">
+                  <button
+                    onClick={handleCheckAllUpdates}
+                    disabled={isCheckingUpdates}
+                    className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/30 transition active:scale-95"
+                  >
+                    <Flame className="w-4 h-4 fill-current" />
+                    <span>
+                      {isCheckingUpdates && checkProgress
+                        ? `กำลังตรวจ ${checkProgress.current}/${checkProgress.total}...`
+                        : "ตรวจหาตอนใหม่ออนไลน์ทันที"}
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
             {selectedTag && (
               <button

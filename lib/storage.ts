@@ -293,20 +293,42 @@ export async function syncWithServer(): Promise<Manga[]> {
   }
 }
 
-// Update chapter url helper
+// Update chapter url helper with multi-pattern reader URL prediction
 export function computeNextChapterUrl(url: string, nextChapter: number): string {
   if (!url) return "";
   try {
-    const decodedUrl = decodeURI(url);
-    const chapterRegex = /((?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?)(\d+(?:\.\d+)?)/i;
-    if (chapterRegex.test(decodedUrl)) {
-      return decodedUrl.replace(chapterRegex, `$1${nextChapter}`);
+    const parsed = new URL(url);
+    let pathname = decodeURIComponent(parsed.pathname);
+
+    // 1. Leading number in slug e.g. /14-return-of-the-legend/ -> /15-return-of-the-legend/
+    const leadMatch = pathname.match(/^(\/?)(\d+(?:\.\d+)?)([-_][a-zA-Z].*)/);
+    if (leadMatch) {
+      pathname = `${leadMatch[1]}${nextChapter}${leadMatch[3]}`;
+      return `${parsed.origin}${pathname}${parsed.search || ""}`;
     }
-    const endNumberRegex = /([-_/])(\d+(?:\.\d+)?)\/?$/;
-    if (endNumberRegex.test(decodedUrl)) {
-      return decodedUrl.replace(endNumberRegex, `$1${nextChapter}/`);
+
+    // 2. Chapter keyword pattern e.g. /chapter-118, /ตอนที่-39, /ch-118, /ep-118
+    const kwMatch = pathname.match(/((?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_.:/]?)(\d+(?:\.\d+)?)/i);
+    if (kwMatch) {
+      pathname = pathname.replace(kwMatch[0], `${kwMatch[1]}${nextChapter}`);
+      return `${parsed.origin}${pathname}${parsed.search || ""}`;
     }
-    return `${decodedUrl.replace(/\/$/, "")}/${nextChapter}`;
+
+    // 3. Trailing hyphen/underscore number e.g. /regressor-of-the-fallen-family-126/ -> /regressor-of-the-fallen-family-127/
+    const trailMatch = pathname.match(/([-_])(\d+(?:\.\d+)?)([\/]?)$/);
+    if (trailMatch) {
+      pathname = pathname.replace(/([-_])(\d+(?:\.\d+)?)([\/]?)$/, `$1${nextChapter}$3`);
+      return `${parsed.origin}${pathname}${parsed.search || ""}`;
+    }
+
+    // 4. Trailing number after slash e.g. /heavyknight/116/ or /nano-machine/118
+    const slashMatch = pathname.match(/\/(\d+(?:\.\d+)?)([\/]?)$/);
+    if (slashMatch) {
+      pathname = pathname.replace(/\/(\d+(?:\.\d+)?)([\/]?)$/, `/${nextChapter}$2`);
+      return `${parsed.origin}${pathname}${parsed.search || ""}`;
+    }
+
+    return `${parsed.origin}${pathname.replace(/\/$/, "")}/${nextChapter}${parsed.search || ""}`;
   } catch {
     return url;
   }
@@ -532,6 +554,43 @@ export async function incrementChapter(id: string): Promise<Manga[]> {
   }
 
   return upsertManga(updated);
+}
+
+// Quick +1 chapter and return predicted next URL for immediate opening
+export async function incrementAndOpenNextChapter(id: string): Promise<{
+  updatedList: Manga[];
+  nextUrl: string | null;
+  nextChapter: number;
+}> {
+  const current = getLocalMangas();
+  const target = current.find((m) => m.id === id);
+  if (!target) return { updatedList: current, nextUrl: null, nextChapter: 0 };
+
+  const nextChapter = target.current_chapter + 1;
+  const primarySource = target.sources?.find((s) => s.is_primary) || target.sources?.[0];
+  const targetSourceUrl = primarySource?.current_chapter_url || primarySource?.base_url || "";
+  const nextUrl = targetSourceUrl ? computeNextChapterUrl(targetSourceUrl, nextChapter) : null;
+
+  const updatedSources = target.sources.map((s) => ({
+    ...s,
+    current_chapter_url: computeNextChapterUrl(s.current_chapter_url || s.base_url, nextChapter),
+  }));
+
+  const updated: Manga = {
+    ...target,
+    current_chapter: nextChapter,
+    sources: updatedSources,
+    last_read_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  if (typeof window !== "undefined") {
+    localStorage.setItem("mangahub_last_read_manga_id", id);
+    recordReadEvent(id, target.title, nextChapter, 1, 'increment');
+  }
+
+  const updatedList = await upsertManga(updated);
+  return { updatedList, nextUrl, nextChapter };
 }
 
 // Touch manga last_read_at when user opens reader or clicks read
