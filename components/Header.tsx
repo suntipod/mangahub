@@ -1,11 +1,14 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Cloud, Wifi, Flame, Loader2, Eye, EyeOff, Database } from "lucide-react";
-import { SupabaseConfig } from "@/types/manga";
+import { BookOpen, RefreshCw, Settings, Plus, Cloud, CloudOff, Wifi, Flame, Loader2, Eye, EyeOff, Database } from "lucide-react";
+import { SupabaseConfig, CloudSyncStatus } from "@/types/manga";
 
 interface HeaderProps {
   supabaseConfig: SupabaseConfig;
+  syncStatus?: CloudSyncStatus;
+  mangasCount?: number;
+  lastSyncedAt?: Date | null;
   isSyncing: boolean;
   onSync: () => void;
   onOpenSettings: () => void;
@@ -22,6 +25,9 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   supabaseConfig,
+  syncStatus = "synced",
+  mangasCount,
+  lastSyncedAt,
   isSyncing,
   onSync,
   onOpenSettings,
@@ -47,19 +53,68 @@ export const Header: React.FC<HeaderProps> = ({
             <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-1.5">
               Manga<span className="text-violet-400">Hub</span>
             </h1>
-            <div className="flex items-center gap-1.5 text-xs">
-              {supabaseConfig.enabled ? (
-                <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                  <Cloud className="w-3 h-3" /> Supabase Cloud Synced
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-emerald-400/90 font-medium">
-                  <Wifi className="w-3 h-3 text-emerald-400" /> Wi-Fi Network Synced
-                </span>
-              )}
+            <div className="flex items-center gap-1.5 text-xs pt-0.5">
+              <button
+                type="button"
+                onClick={onSync}
+                disabled={isSyncing}
+                title={
+                  syncStatus === "syncing"
+                    ? "กำลังซิงค์ข้อมูลกับ Cloud... (โปรดรอสักครู่ก่อนปิดแท็บ)"
+                    : syncStatus === "synced"
+                    ? `🟢 ข้อมูลในเครื่องกับ Supabase ตรงกันสมบูรณ์ (${mangasCount || 0} เรื่อง) ${
+                        lastSyncedAt
+                          ? `• ซิงค์ล่าสุด ${lastSyncedAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.`
+                          : ""
+                      } - คลิกเพื่อซิงค์ใหม่อีกครั้ง`
+                    : syncStatus === "offline"
+                    ? "🔴 ออฟไลน์ / ไม่สามารถเชื่อมต่อ Supabase ได้ (บันทึกในเครื่องเรียบร้อยแล้ว) - คลิกเพื่อลองใหม่"
+                    : `⚪ บันทึกในเครื่อง (${mangasCount || 0} เรื่อง) - คลิกเพื่อเปิดการตั้งค่า Supabase`
+                }
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition border active:scale-95 text-left ${
+                  syncStatus === "syncing"
+                    ? "bg-amber-950/40 border-amber-500/40 text-amber-300"
+                    : syncStatus === "synced"
+                    ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-300 hover:bg-emerald-900/40"
+                    : syncStatus === "offline"
+                    ? "bg-rose-950/50 border-rose-500/40 text-rose-300 hover:bg-rose-900/40"
+                    : "bg-[#131B2E] border-[#1F2E45] text-gray-400 hover:text-gray-300"
+                }`}
+              >
+                {syncStatus === "syncing" ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-400 shrink-0" />
+                    <span className="text-[11px] font-semibold text-amber-300">Syncing...</span>
+                  </>
+                ) : syncStatus === "synced" ? (
+                  <>
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-300">Synced</span>
+                    {typeof mangasCount === "number" && (
+                      <span className="text-[10px] text-emerald-400/80 hidden sm:inline">
+                        ({mangasCount})
+                      </span>
+                    )}
+                  </>
+                ) : syncStatus === "offline" ? (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0"></span>
+                    <span className="text-[11px] font-semibold text-rose-300">Offline</span>
+                  </>
+                ) : (
+                  <>
+                    <Wifi className="w-3 h-3 text-cyan-400 shrink-0" />
+                    <span className="text-[11px] text-gray-400">Local ({mangasCount || 0})</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
+
 
         {/* Search input (Hidden on small screens) */}
         <div className="flex-1 max-w-md hidden sm:block">

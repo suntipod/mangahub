@@ -62,3 +62,6 @@ export interface MangaBackupData {
   mangas: Manga[];
 }
 
+export type CloudSyncStatus = "synced" | "syncing" | "offline" | "disabled";
+
+

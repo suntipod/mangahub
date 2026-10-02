@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Manga, ReadingStatus, SupabaseConfig, DEFAULT_CATEGORIES } from "@/types/manga";
+import { Manga, ReadingStatus, SupabaseConfig, DEFAULT_CATEGORIES, CloudSyncStatus } from "@/types/manga";
+
 import {
   getLocalMangas,
   saveLocalMangas,
@@ -106,6 +107,30 @@ export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
 
+  // Cloud Sync state
+  const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>("syncing");
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+
+  // Helper to wrap mutations with sync status tracking
+  const trackSyncMutation = async <T,>(action: () => Promise<T>): Promise<T> => {
+    if (supabaseConfig.enabled) {
+      setSyncStatus("syncing");
+    }
+    try {
+      const res = await action();
+      if (supabaseConfig.enabled) {
+        setSyncStatus("synced");
+        setLastSyncedAt(new Date());
+      }
+      return res;
+    } catch (err) {
+      if (supabaseConfig.enabled) {
+        setSyncStatus("offline");
+      }
+      throw err;
+    }
+  };
+
   // Load initial data (Local cache + Cloud/Server Sync)
   useEffect(() => {
     // 1. Render local cache immediately
@@ -119,10 +144,22 @@ export default function Home() {
 
     // 2. Fetch from primary source (Supabase if enabled, otherwise local server fallback)
     if (loadedConfig.enabled) {
-      syncWithSupabase().then(() => {
-        setMangas(getLocalMangas());
-      });
+      setSyncStatus("syncing");
+      syncWithSupabase()
+        .then((res) => {
+          if (res.error) {
+            setSyncStatus("offline");
+          } else {
+            setSyncStatus("synced");
+            setLastSyncedAt(new Date());
+          }
+          setMangas(getLocalMangas());
+        })
+        .catch(() => {
+          setSyncStatus("offline");
+        });
     } else {
+      setSyncStatus("disabled");
       syncWithServer().then((serverData) => {
         if (serverData && serverData.length > 0) {
           setMangas(serverData);
@@ -147,6 +184,7 @@ export default function Home() {
         { event: "*", schema: "public", table: "mangas" },
         async () => {
           try {
+            setSyncStatus("syncing");
             const remote = await fetchRemoteMangas(client);
             if (remote && remote.length > 0) {
               const local = getLocalMangas();
@@ -154,8 +192,11 @@ export default function Home() {
               setMangas(merged);
               saveLocalMangas(merged);
             }
+            setSyncStatus("synced");
+            setLastSyncedAt(new Date());
           } catch (e) {
             console.error("Realtime fetch error:", e);
+            setSyncStatus("offline");
           }
         }
       )
@@ -166,25 +207,72 @@ export default function Home() {
     };
   }, [supabaseConfig]);
 
+  // Handle browser online/offline status
+  useEffect(() => {
+    const handleOnline = () => {
+      if (supabaseConfig.enabled) {
+        handleSync();
+      }
+    };
+    const handleOffline = () => {
+      if (supabaseConfig.enabled) {
+        setSyncStatus("offline");
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [supabaseConfig.enabled]);
+
+  // Warn user before leaving if currently syncing with cloud
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (syncStatus === "syncing") {
+        e.preventDefault();
+        e.returnValue = "ข้อมูลกำลังซิงค์ขึ้น Cloud คุณต้องการออกจากหน้านี้หรือไม่?";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [syncStatus]);
+
   // Handle Sync (syncs with primary source: Supabase or local server)
   const handleSync = async () => {
     setIsSyncing(true);
+    if (supabaseConfig.enabled) {
+      setSyncStatus("syncing");
+    }
     try {
       if (supabaseConfig.enabled) {
-        await syncWithSupabase();
+        const res = await syncWithSupabase();
+        if (res.error) {
+          setSyncStatus("offline");
+        } else {
+          setSyncStatus("synced");
+          setLastSyncedAt(new Date());
+        }
         setMangas(getLocalMangas());
       } else {
         const serverData = await syncWithServer();
         if (serverData && serverData.length > 0) {
           setMangas(serverData);
         }
+        setSyncStatus("disabled");
       }
     } catch (e) {
       console.error("Sync error:", e);
+      if (supabaseConfig.enabled) {
+        setSyncStatus("offline");
+      }
     } finally {
       setIsSyncing(false);
     }
   };
+
 
   // Check online updates for all mangas with linked sources
   const handleCheckAllUpdates = async () => {
@@ -236,39 +324,51 @@ export default function Home() {
 
   // Add new manga
   const handleAddManga = async (newManga: Manga) => {
-    const updated = await upsertManga(newManga);
-    setMangas(updated);
+    await trackSyncMutation(async () => {
+      const updated = await upsertManga(newManga);
+      setMangas(updated);
+    });
   };
 
   // Batch add multiple new mangas
   const handleAddMangas = async (newMangas: Manga[]) => {
-    const updated = await upsertMangas(newMangas);
-    setMangas(updated);
+    await trackSyncMutation(async () => {
+      const updated = await upsertMangas(newMangas);
+      setMangas(updated);
+    });
   };
 
   // Update existing manga
   const handleUpdateManga = async (updatedManga: Manga) => {
-    const updated = await upsertManga(updatedManga);
-    setMangas(updated);
+    await trackSyncMutation(async () => {
+      const updated = await upsertManga(updatedManga);
+      setMangas(updated);
+    });
   };
 
   // Quick increment chapter (+1)
   const handleIncrementChapter = async (id: string) => {
-    const updated = await incrementChapter(id);
-    setMangas(updated);
+    await trackSyncMutation(async () => {
+      const updated = await incrementChapter(id);
+      setMangas(updated);
+    });
   };
 
   // Quick Sync to latest available chapter
   const handleSyncToLatest = async (id: string, latestChapter: number) => {
-    const updated = await setChapter(id, latestChapter);
-    setMangas(updated);
+    await trackSyncMutation(async () => {
+      const updated = await setChapter(id, latestChapter);
+      setMangas(updated);
+    });
   };
 
   // Open reader and update recently read
   const handleOpenReader = async (manga: Manga) => {
     setLastReadMangaId(manga.id);
-    const updated = await touchMangaRead(manga.id);
-    setMangas(updated);
+    await trackSyncMutation(async () => {
+      const updated = await touchMangaRead(manga.id);
+      setMangas(updated);
+    });
 
     const primarySource = manga.sources?.find((s) => s.is_primary) || manga.sources?.[0];
     const targetUrl = primarySource?.current_chapter_url || primarySource?.base_url;
@@ -281,8 +381,10 @@ export default function Home() {
 
   // Delete manga
   const handleDeleteManga = async (id: string) => {
-    const updated = await removeManga(id);
-    setMangas(updated);
+    await trackSyncMutation(async () => {
+      const updated = await removeManga(id);
+      setMangas(updated);
+    });
   };
 
   // Save Supabase Config
@@ -290,9 +392,13 @@ export default function Home() {
     setSupabaseConfig(newConfig);
     saveSupabaseConfig(newConfig);
     if (newConfig.enabled) {
+      setSyncStatus("syncing");
       setTimeout(() => handleSync(), 100);
+    } else {
+      setSyncStatus("disabled");
     }
   };
+
 
   // Find the most recently read manga
   const recentlyReadManga = useMemo(() => {
@@ -398,6 +504,9 @@ export default function Home() {
       {/* Header */}
       <Header
         supabaseConfig={supabaseConfig}
+        syncStatus={syncStatus}
+        mangasCount={mangas.length}
+        lastSyncedAt={lastSyncedAt}
         isSyncing={isSyncing}
         onSync={handleSync}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -931,7 +1040,12 @@ export default function Home() {
         onDataRestored={() => {
           setMangas(getLocalMangas());
           setAvailableCategories(getStoredCategories());
+          if (supabaseConfig.enabled) {
+            setSyncStatus("synced");
+            setLastSyncedAt(new Date());
+          }
         }}
+
       />
     </div>
 
