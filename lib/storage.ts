@@ -619,7 +619,7 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
   const sourcesToCheck = activeSources.length > 0 ? activeSources : manga.sources;
 
   for (const source of sourcesToCheck) {
-    const urlToCheck = source.current_chapter_url || source.base_url;
+    const urlToCheck = source.base_url || source.current_chapter_url;
     if (!urlToCheck) continue;
 
     try {

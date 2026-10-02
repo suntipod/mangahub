@@ -216,8 +216,8 @@ function findSeriesUrlFromHtml(html: string, currentUrl: string): string | null 
   return seriesUrl;
 }
 
-// Fallback to derive series root page from a chapter URL path
-function deriveSeriesUrl(urlStr: string): string | null {
+// Derive prioritized candidate series root URLs from a chapter reader path
+function getSeriesCandidates(urlStr: string): string[] {
   try {
     const u = new URL(urlStr);
     let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
@@ -230,11 +230,34 @@ function deriveSeriesUrl(urlStr: string): string | null {
       .replace(/\/\d+(?:\.\d+)?$/, "")
       .replace(/[-_](\d+)$/, "");
 
-    if (cleanPath && cleanPath !== pathname && cleanPath !== "") {
-      return `${u.origin}${cleanPath}/`;
+    const segments = cleanPath.split("/").filter(Boolean);
+    const slug = segments[segments.length - 1] || "";
+    const isAlreadyRoot =
+      segments.length === 2 &&
+      (segments[0] === "manga" || segments[0] === "series" || segments[0] === "comic" || segments[0] === "content");
+
+    const candidates: string[] = [];
+    if (isAlreadyRoot) {
+      candidates.push(`${u.origin}/${segments[0]}/${segments[1]}/`);
+    } else if (slug && slug !== "manga" && slug !== "series" && slug !== "comic" && slug !== "content") {
+      // Prioritize WordPress Manga themes (/manga/, /series/, /comic/, /content/, /{slug}/)
+      candidates.push(`${u.origin}/manga/${slug}/`);
+      candidates.push(`${u.origin}/series/${slug}/`);
+      candidates.push(`${u.origin}/comic/${slug}/`);
+      candidates.push(`${u.origin}/content/${slug}/`);
+      candidates.push(`${u.origin}/${slug}/`);
     }
-  } catch {}
-  return null;
+
+    return Array.from(new Set(candidates));
+  } catch {
+    return [];
+  }
+}
+
+// Fallback to derive primary series root page
+function deriveSeriesUrl(urlStr: string): string | null {
+  const cands = getSeriesCandidates(urlStr);
+  return cands.length > 0 ? cands[0] : null;
 }
 
 // Statistical outlier filter to remove rogue typos (e.g. [1255, 211, 210, ...] -> 1255 is an anomaly)
@@ -499,32 +522,51 @@ export async function POST(req: NextRequest) {
     const seriesSlug = extractSeriesSlug(parsedUrl.href);
     const checkedChapters: number[] = [];
 
-    // 2. Fetch primary URL provided
-    const primaryHtml = await fetchPageHtml(parsedUrl.href);
-    if (primaryHtml) {
-      const chapters = extractChaptersFromHtml(primaryHtml, seriesSlug, Number(currentChapter));
-      checkedChapters.push(...chapters);
-    }
+    // Check if input URL looks like a chapter reader page
+    const hasChapterInPath = Boolean(extractChapterFromUrl(parsedUrl.href));
+    const candidateSeriesUrls = getSeriesCandidates(parsedUrl.href);
 
-    // 3. If URL is a chapter page, also find and fetch the series root page for the complete chapter list
-    const breadcrumbSeriesUrl = primaryHtml ? findSeriesUrlFromHtml(primaryHtml, parsedUrl.href) : null;
-    const derivedSeriesUrl = deriveSeriesUrl(parsedUrl.href);
-    const seriesUrlToFetch = breadcrumbSeriesUrl || derivedSeriesUrl;
-
-    if (seriesUrlToFetch && seriesUrlToFetch !== parsedUrl.href) {
-      const seriesHtml = await fetchPageHtml(seriesUrlToFetch);
-      if (seriesHtml) {
-        const seriesChapters = extractChaptersFromHtml(seriesHtml, seriesSlug, Number(currentChapter));
-        checkedChapters.push(...seriesChapters);
+    // 2. If the user provided a chapter URL (e.g. /regressor-...-126/),
+    // try candidate series root URLs first, because the series directory
+    // contains the full authoritative chapter list (#chapterlist)!
+    if (hasChapterInPath && candidateSeriesUrls.length > 0) {
+      for (const candUrl of candidateSeriesUrls) {
+        if (candUrl === parsedUrl.href) continue;
+        const candHtml = await fetchPageHtml(candUrl);
+        if (candHtml) {
+          const chapters = extractChaptersFromHtml(candHtml, seriesSlug, Number(currentChapter));
+          if (chapters.length > 0) {
+            checkedChapters.push(...chapters);
+            break; // Master series table of contents found!
+          }
+        }
       }
     }
 
-    // 4. Fallback: If 0 chapters were detected from HTML (e.g. Cloudflare protection or single-page reader),
-    // extract chapter directly from the URL itself (e.g. ...-ตอนที่-91/ or .../ch-91/)
+    // 3. Fetch primary URL if we haven't found chapters yet, or if input URL is already a series page
+    let primaryHtml: string | null = null;
     if (checkedChapters.length === 0) {
-      const urlChapter = extractChapterFromUrl(parsedUrl.href);
-      if (urlChapter && urlChapter > 0) {
-        checkedChapters.push(urlChapter);
+      primaryHtml = await fetchPageHtml(parsedUrl.href);
+      if (primaryHtml) {
+        const chapters = extractChaptersFromHtml(primaryHtml, seriesSlug, Number(currentChapter));
+        checkedChapters.push(...chapters);
+      }
+    }
+
+    // 4. If primary URL was fetched and we still don't have chapters (or to cross-reference),
+    // check if the reader page breadcrumbs explicitly link to the series page!
+    if (primaryHtml) {
+      const breadcrumbSeriesUrl = findSeriesUrlFromHtml(primaryHtml, parsedUrl.href);
+      if (
+        breadcrumbSeriesUrl &&
+        breadcrumbSeriesUrl !== parsedUrl.href &&
+        !candidateSeriesUrls.includes(breadcrumbSeriesUrl)
+      ) {
+        const seriesHtml = await fetchPageHtml(breadcrumbSeriesUrl);
+        if (seriesHtml) {
+          const seriesChapters = extractChaptersFromHtml(seriesHtml, seriesSlug, Number(currentChapter));
+          checkedChapters.push(...seriesChapters);
+        }
       }
     }
 
@@ -542,7 +584,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // If 0 chapters were detected, do NOT pretend that currentChapter is the latest!
+    // If 0 chapters were detected from HTML, do NOT pretend that currentChapter or URL is the latest!
     return NextResponse.json({
       success: false,
       error: "ไม่พบข้อมูลตอนในหน้าเว็บ หรือหน้าเว็บอาจมีระบบป้องกัน",

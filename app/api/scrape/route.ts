@@ -184,6 +184,60 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
 
 import { findBestCovers } from "@/lib/cover-search";
 
+// Find link back to series root from reader breadcrumb or "All Chapters"
+function findSeriesUrlFromHtml(html: string, currentUrl: string): string | null {
+  const $ = cheerio.load(html);
+  let seriesUrl: string | null = null;
+  try {
+    const currentOrigin = new URL(currentUrl).origin;
+    $(".breadcrumb a, .allc a, .ts-breadcrumb a, .c-breadcrumb a, [itemprop='itemListElement'] a, .headpost a, a.allc").each((_, el) => {
+      if (seriesUrl) return;
+      const href = $(el).attr("href");
+      if (!href) return;
+      try {
+        const target = new URL(href, currentUrl);
+        if (target.origin !== currentOrigin) return;
+        const path = target.pathname.replace(/\/$/, "");
+        if (!path || path === "" || path === "/manga" || path === "/series" || path === "/comics") {
+          return;
+        }
+        if (target.href === currentUrl) return;
+        if (target.protocol.startsWith("http")) {
+          seriesUrl = target.href;
+        }
+      } catch {}
+    });
+  } catch {}
+  return seriesUrl;
+}
+
+// Derive candidate series root page
+function deriveSeriesUrl(urlStr: string): string | null {
+  try {
+    const u = new URL(urlStr);
+    let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
+    pathname = pathname.replace(/^\/?\d+[-_]/, "/");
+    const cleanPath = pathname
+      .replace(/[-_](?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+(?:\.\d+)?$/i, "")
+      .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?$/i, "")
+      .replace(/\/\d+(?:\.\d+)?$/, "")
+      .replace(/[-_](\d+)$/, "");
+
+    const segments = cleanPath.split("/").filter(Boolean);
+    const slug = segments[segments.length - 1] || "";
+    const isAlreadyRoot =
+      segments.length === 2 &&
+      (segments[0] === "manga" || segments[0] === "series" || segments[0] === "comic" || segments[0] === "content");
+
+    if (isAlreadyRoot) {
+      return `${u.origin}/${segments[0]}/${segments[1]}/`;
+    } else if (slug && slug !== "manga" && slug !== "series" && slug !== "comic" && slug !== "content") {
+      return `${u.origin}/manga/${slug}/`;
+    }
+  } catch {}
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -222,6 +276,8 @@ export async function POST(req: NextRequest) {
     let title = "";
     let coverUrl = "";
     let fetchSuccess = false;
+
+    let seriesUrl = "";
 
     // Fetch the webpage with realistic browser User-Agent
     try {
@@ -268,6 +324,12 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // 3. Extract Canonical Series URL from reader breadcrumb
+        const breadcrumbSeries = findSeriesUrlFromHtml(html, parsedUrl.href);
+        if (breadcrumbSeries) {
+          seriesUrl = breadcrumbSeries;
+        }
+
         fetchSuccess = true;
       }
     } catch (fetchErr) {
@@ -279,9 +341,22 @@ export async function POST(req: NextRequest) {
       title = cleanProvidedTitle || urlDerived.title;
     }
 
+    // Strip trailing chapter number from title if it matches detectedChapter (e.g. "Regressor of the Fallen family 126" -> "Regressor of the Fallen family")
+    if (detectedChapter && title.length > 5) {
+      const chStr = detectedChapter.toString();
+      if (title.endsWith(` ${chStr}`) || title.endsWith(`-${chStr}`) || title.endsWith(`_${chStr}`)) {
+        title = title.slice(0, title.length - chStr.length - 1).trim();
+      }
+    }
+
     // Final fallback: derive from site name
     if (!title) {
       title = `การ์ตูนจาก ${siteName}`;
+    }
+
+    // If seriesUrl was not found in breadcrumbs, derive from URL structure
+    if (!seriesUrl) {
+      seriesUrl = deriveSeriesUrl(parsedUrl.href) || parsedUrl.href;
     }
 
     // Handle relative cover URLs
@@ -318,6 +393,7 @@ export async function POST(req: NextRequest) {
         cover_url: coverUrl,
         current_chapter: detectedChapter || 1,
         site_name: siteName,
+        series_url: seriesUrl || parsedUrl.href,
         original_url: parsedUrl.href,
       },
     });

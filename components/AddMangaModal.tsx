@@ -169,6 +169,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   const [coverUrl, setCoverUrl] = useState("");
   const [chapter, setChapter] = useState<number>(1);
   const [siteName, setSiteName] = useState("");
+  const [seriesUrl, setSeriesUrl] = useState("");
   const [tier, setTier] = useState<TierRating>("none");
   const [keepOpenForBatch, setKeepOpenForBatch] = useState(true);
   const [addedSuccess, setAddedSuccess] = useState(false);
@@ -240,6 +241,9 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         setChapter(data.current_chapter);
       }
       setSiteName(data.site_name || "Manga Site");
+      if (data.series_url) {
+        setSeriesUrl(data.series_url);
+      }
 
       if (json.warning) {
         setWarningMsg(json.warning);
@@ -345,7 +349,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `src-${Date.now()}`,
       manga_id: mangaId,
       site_name: siteName || "เว็บหลัก",
-      base_url: url.trim(),
+      base_url: seriesUrl || url.trim(),
       current_chapter_url: url.trim(),
       is_primary: true,
       is_active: true,
@@ -375,6 +379,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         setCoverUrl("");
         setChapter(1);
         setSiteName("");
+        setSeriesUrl("");
         setErrorMsg("");
         setWarningMsg("");
         setAddedSuccess(false);
@@ -409,6 +414,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       let scrapedCover = "";
       let chosenChapter = item.chapter; // Use user-specified or auto-parsed chapter!
       let scrapedSite = item.siteName || "เว็บอ่าน";
+      let scrapedSeriesUrl = item.url;
       let status: "success" | "fallback" = "fallback";
 
       try {
@@ -427,6 +433,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
               chosenChapter = json.data.current_chapter;
             }
             if (json.data.site_name) scrapedSite = json.data.site_name;
+            if (json.data.series_url) scrapedSeriesUrl = json.data.series_url;
             if (scrapedTitle) status = "success";
           }
         }
@@ -489,7 +496,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
             id: sourceId,
             manga_id: mangaId,
             site_name: scrapedSite,
-            base_url: item.url,
+            base_url: scrapedSeriesUrl || item.url,
             current_chapter_url: item.url,
             is_primary: true,
             is_active: true,
