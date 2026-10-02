@@ -1,13 +1,15 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Share, PlusSquare, X, Smartphone, CheckCircle } from "lucide-react";
+import { Share, PlusSquare, X, Smartphone, CheckCircle, Download } from "lucide-react";
+import { InstallPwaModal } from "./InstallPwaModal";
 
 export const PWARegister: React.FC = () => {
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIOSPrompt, setShowIOSPrompt] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     // 1. Register Service Worker
@@ -51,9 +53,14 @@ export const PWARegister: React.FC = () => {
       setDeferredPrompt(e);
     };
 
+    // 6. Listen for manual open trigger from header/settings
+    const handleOpenInstall = () => setIsModalOpen(true);
+
     window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    window.addEventListener("mangahub-open-install-pwa", handleOpenInstall);
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+      window.removeEventListener("mangahub-open-install-pwa", handleOpenInstall);
     };
   }, []);
 
@@ -63,7 +70,10 @@ export const PWARegister: React.FC = () => {
   };
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
+    if (!deferredPrompt) {
+      setIsModalOpen(true);
+      return;
+    }
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === "accepted") {
@@ -71,11 +81,18 @@ export const PWARegister: React.FC = () => {
     }
   };
 
-  // Don't render anything if already running standalone
-  if (isStandalone) return null;
-
   return (
     <>
+      <InstallPwaModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        deferredPrompt={deferredPrompt}
+        onPromptAccepted={() => setDeferredPrompt(null)}
+      />
+
+      {/* Don't render banner if already running standalone */}
+      {!isStandalone && (
+        <>
       {/* iOS Safari "Add to Home Screen" Floating Hint */}
       {showIOSPrompt && isIOS && (
         <div className="fixed bottom-20 sm:bottom-6 left-4 right-4 max-w-md mx-auto z-50 bg-[#111827]/95 backdrop-blur-xl border border-violet-500/40 rounded-2xl p-4 shadow-2xl shadow-violet-950/60 animate-fade-in text-gray-100">
@@ -144,6 +161,8 @@ export const PWARegister: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+        </>
       )}
     </>
   );

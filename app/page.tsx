@@ -35,6 +35,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { BackupModal } from "@/components/BackupModal";
 import { ReadingStatsModal } from "@/components/ReadingStatsModal";
 import { RandomPickerModal } from "@/components/RandomPickerModal";
+import { ReadingDashboardBanner } from "@/components/ReadingDashboardBanner";
 import {
   BookOpen,
   Plus,
@@ -621,6 +622,7 @@ export default function Home() {
         onSync={handleSync}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenBackup={() => setIsBackupOpen(true)}
+        onOpenInstallPwa={() => window.dispatchEvent(new CustomEvent("mangahub-open-install-pwa"))}
         onOpenStats={() => setIsStatsOpen(true)}
         onOpenRandom={() => setIsRandomOpen(true)}
         onOpenAdd={() => setIsAddOpen(true)}
@@ -895,6 +897,15 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* Reading Tracker Dashboard Banner */}
+        <ReadingDashboardBanner
+          mangas={mangas}
+          onOpenStats={() => setIsStatsOpen(true)}
+          onOpenReader={handleOpenReader}
+          onTagClick={(tag) => setSelectedTag(selectedTag === tag ? null : tag)}
+          onCategoryClick={(cat) => setSelectedCategory(cat)}
+        />
 
         {/* Category & Tier Filter Toolbar */}
         <div className="space-y-2.5 pt-1">
@@ -1324,6 +1335,10 @@ export default function Home() {
         onDataImported={() => setMangas(getLocalMangas())}
         onCategoriesChanged={() => setAvailableCategories(getStoredCategories())}
         onOpenBackup={() => setIsBackupOpen(true)}
+        onOpenInstallPwa={() => {
+          setIsSettingsOpen(false);
+          window.dispatchEvent(new CustomEvent("mangahub-open-install-pwa"));
+        }}
       />
 
       <BackupModal

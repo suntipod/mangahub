@@ -42,6 +42,7 @@ interface SettingsModalProps {
   onDataImported: () => void;
   onCategoriesChanged?: () => void;
   onOpenBackup?: () => void;
+  onOpenInstallPwa?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -52,6 +53,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDataImported,
   onCategoriesChanged,
   onOpenBackup,
+  onOpenInstallPwa,
 }) => {
   if (!isOpen) return null;
 
@@ -556,15 +558,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* PWA iPhone Guide */}
+          {/* PWA Mobile App Guide */}
           <div className="bg-[#141E33] border border-[#1F2E45] rounded-2xl p-4 space-y-2.5">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <Smartphone className="w-4 h-4 text-violet-400" />
-              <span>การใช้งานเป็น App บน iPhone (Safari)</span>
+              <span>การใช้งานเป็น App บนมือถือ (iPhone & Android)</span>
             </h3>
             <p className="text-[11px] text-gray-400 leading-relaxed">
-              เปิดเว็บนี้ใน iPhone Safari แล้วกดปุ่ม <strong>แชร์ (Share)</strong> ด้านล่างจอ จากนั้นเลือก <strong>"เพิ่มไปยังหน้าจอโฮม (Add to Home Screen)"</strong> เพื่อใช้งานได้เต็มหน้าจอเหมือนแอปพลิเคชันจริงโดยไม่มีแถบ Safari กวนใจ!
+              เปิดเว็บนี้ใน Safari หรือ Chrome แล้วเลือก <strong>&quot;เพิ่มไปยังหน้าจอโฮม&quot;</strong> เพื่อใช้งานได้เต็มหน้าจอเหมือนแอปพลิเคชันจริงโดยไม่มีแถบ URL กวนใจ!
             </p>
+            {onOpenInstallPwa && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenInstallPwa();
+                }}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600/30 to-indigo-600/30 hover:from-violet-600/50 hover:to-indigo-600/50 text-violet-200 font-bold text-xs py-2 px-3 rounded-xl border border-violet-500/40 transition active:scale-95"
+              >
+                <Smartphone className="w-4 h-4 text-violet-400" />
+                <span>📲 ดูวิธีติดตั้งแอป & เพิ่มลงหน้าจอโฮม</span>
+              </button>
+            )}
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Cloud, CloudOff, Wifi, Flame, Loader2, Eye, EyeOff, Database, Dices, BarChart3 } from "lucide-react";
+import { BookOpen, RefreshCw, Settings, Plus, Cloud, CloudOff, Wifi, Flame, Loader2, Eye, EyeOff, Database, Dices, BarChart3, Smartphone } from "lucide-react";
 import { SupabaseConfig, CloudSyncStatus } from "@/types/manga";
 
 interface HeaderProps {
@@ -13,6 +13,7 @@ interface HeaderProps {
   onSync: () => void;
   onOpenSettings: () => void;
   onOpenBackup?: () => void;
+  onOpenInstallPwa?: () => void;
   onOpenStats?: () => void;
   onOpenRandom?: () => void;
   onOpenAdd: () => void;
@@ -34,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSync,
   onOpenSettings,
   onOpenBackup,
+  onOpenInstallPwa,
   onOpenStats,
   onOpenRandom,
   onOpenAdd,
@@ -233,10 +235,22 @@ export const Header: React.FC<HeaderProps> = ({
           {onOpenBackup && (
             <button
               onClick={onOpenBackup}
-              title="สำรองและกู้คืนข้อมูล (Backup & Restore JSON)"
+              title="สำรองและกู้คืนข้อมูล (Backup & Restore JSON / Excel CSV)"
               className="p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-emerald-400 hover:text-emerald-300 transition"
             >
               <Database className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Install PWA Mobile App Button */}
+          {onOpenInstallPwa && (
+            <button
+              onClick={onOpenInstallPwa}
+              title="วิธีติดตั้งลงมือถือ / เปิดใช้งานเต็มจอ (PWA App)"
+              className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-violet-600/30 to-indigo-600/30 hover:from-violet-600/50 hover:to-indigo-600/50 border border-violet-500/40 text-violet-200 transition active:scale-95"
+            >
+              <Smartphone className="w-4 h-4 text-violet-400 shrink-0" />
+              <span className="hidden lg:inline text-[11px]">ติดตั้งแอป</span>
             </button>
           )}
 
