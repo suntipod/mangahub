@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Manga, MangaSource } from "@/types/manga";
+import { Manga, MangaSource, TierRating } from "@/types/manga";
 import { getStoredCategories } from "@/lib/categories";
 import {
   X,
@@ -169,6 +169,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   const [coverUrl, setCoverUrl] = useState("");
   const [chapter, setChapter] = useState<number>(1);
   const [siteName, setSiteName] = useState("");
+  const [tier, setTier] = useState<TierRating>("none");
   const [keepOpenForBatch, setKeepOpenForBatch] = useState(true);
   const [addedSuccess, setAddedSuccess] = useState(false);
 
@@ -356,7 +357,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       cover_url: coverUrl.trim(),
       current_chapter: chapter,
       status: "reading",
-      tier: "none",
+      tier: tier,
       category: category || "การ์ตูนทั่วไป",
       sources: [initialSource],
       last_read_at: new Date().toISOString(),
@@ -1023,6 +1024,42 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                                 : "📚 "}
                               {cat}
                             </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-gray-400 block mb-1">
+                        ระดับ Tier (ความชอบ)
+                      </label>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[
+                          { val: "none", label: "⭐ ไม่ระบุ" },
+                          { val: "S", label: "👑 Tier S" },
+                          { val: "A", label: "🔥 Tier A" },
+                          { val: "B", label: "✨ Tier B" },
+                          { val: "C", label: "👍 Tier C" },
+                        ].map((t) => (
+                          <button
+                            key={t.val}
+                            type="button"
+                            onClick={() => setTier(t.val as TierRating)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                              tier === t.val
+                                ? t.val === "S"
+                                  ? "bg-amber-400 text-black shadow-md shadow-amber-400/30"
+                                  : t.val === "A"
+                                  ? "bg-orange-500 text-white shadow-md shadow-orange-500/30"
+                                  : t.val === "B"
+                                  ? "bg-sky-500 text-white shadow-md shadow-sky-500/30"
+                                  : t.val === "C"
+                                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                                  : "bg-gray-600 text-white shadow-md"
+                                : "bg-[#0D1322] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+                            }`}
+                          >
+                            <span>{t.label}</span>
                           </button>
                         ))}
                       </div>

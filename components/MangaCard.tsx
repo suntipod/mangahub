@@ -2,13 +2,15 @@
 
 import React, { useState, useEffect } from "react";
 import { Manga } from "@/types/manga";
-import { ExternalLink, Plus, Globe, Check, Flame, Zap, EyeOff } from "lucide-react";
+import { ExternalLink, Plus, Globe, Check, Flame, Zap, EyeOff, BookOpen } from "lucide-react";
 
 interface MangaCardProps {
   manga: Manga;
   onSelect: (manga: Manga) => void;
   onIncrement: (id: string) => void;
   onSyncToLatest?: (id: string, latestChapter: number) => void;
+  onOpenReader?: (manga: Manga) => void;
+  isRecentlyRead?: boolean;
   viewMode?: "poster" | "compact";
   isDiscreetMode?: boolean;
 }
@@ -18,6 +20,8 @@ export const MangaCard: React.FC<MangaCardProps> = ({
   onSelect,
   onIncrement,
   onSyncToLatest,
+  onOpenReader,
+  isRecentlyRead = false,
   viewMode = "poster",
   isDiscreetMode = false,
 }) => {
@@ -71,6 +75,10 @@ export const MangaCard: React.FC<MangaCardProps> = ({
 
   const handleOpenReader = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (onOpenReader) {
+      onOpenReader(manga);
+      return;
+    }
     if (primarySource?.current_chapter_url) {
       window.open(primarySource.current_chapter_url, "_blank", "noopener,noreferrer");
     } else if (primarySource?.base_url) {
@@ -87,7 +95,11 @@ export const MangaCard: React.FC<MangaCardProps> = ({
     return (
       <div
         onClick={() => onSelect(manga)}
-        className="group relative aspect-[2/3] w-full bg-[#111827] border border-[#1F2E45]/80 hover:border-violet-500/80 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-2xl hover:shadow-violet-950/40 select-none flex flex-col justify-end"
+        className={`group relative aspect-[2/3] w-full bg-[#111827] border rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1.5 select-none flex flex-col justify-end ${
+          isRecentlyRead
+            ? "border-violet-500 ring-2 ring-violet-500/80 shadow-2xl shadow-violet-900/50"
+            : "border-[#1F2E45]/80 hover:border-violet-500/80 hover:shadow-2xl hover:shadow-violet-950/40"
+        }`}
       >
         {/* Full-Bleed Cover Image */}
         {currentCover && !imgError ? (
@@ -146,8 +158,14 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             )}
           </div>
 
-          {/* Right badges: Category & Tier */}
-          <div className="flex items-center gap-1">
+          {/* Right badges: Recently Read, Category & Tier */}
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            {isRecentlyRead && (
+              <span className="bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-md shadow-violet-600/40 flex items-center gap-0.5 animate-pulse">
+                <BookOpen className="w-2.5 h-2.5" />
+                <span>อ่านล่าสุด</span>
+              </span>
+            )}
             {manga.category && (
               <span
                 className={`backdrop-blur-md text-[10px] font-extrabold px-1.5 py-0.5 rounded-md shadow ${
@@ -166,8 +184,28 @@ export const MangaCard: React.FC<MangaCardProps> = ({
               </span>
             )}
             {manga.tier && manga.tier !== "none" && (
-              <span className="bg-amber-500/90 backdrop-blur-md text-black font-extrabold text-[10px] px-1.5 py-0.5 rounded-md shadow">
-                {manga.tier}
+              <span
+                className={`backdrop-blur-md text-[10px] font-black px-1.5 py-0.5 rounded-md shadow ${
+                  manga.tier === "S"
+                    ? "bg-amber-400 text-black shadow-amber-400/30"
+                    : manga.tier === "A"
+                    ? "bg-orange-500 text-white shadow-orange-500/30"
+                    : manga.tier === "B"
+                    ? "bg-sky-500 text-white shadow-sky-500/30"
+                    : manga.tier === "C"
+                    ? "bg-emerald-600 text-white shadow-emerald-600/30"
+                    : "bg-amber-500/90 text-black"
+                }`}
+              >
+                {manga.tier === "S"
+                  ? "👑 S"
+                  : manga.tier === "A"
+                  ? "🔥 A"
+                  : manga.tier === "B"
+                  ? "✨ B"
+                  : manga.tier === "C"
+                  ? "👍 C"
+                  : manga.tier}
               </span>
             )}
           </div>
@@ -260,7 +298,11 @@ export const MangaCard: React.FC<MangaCardProps> = ({
   return (
     <div
       onClick={() => onSelect(manga)}
-      className="group relative bg-[#131B2E] hover:bg-[#162032] border border-[#1F2E45] hover:border-violet-500/50 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-900/10 flex flex-col"
+      className={`group relative bg-[#131B2E] hover:bg-[#162032] border rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-1 flex flex-col ${
+        isRecentlyRead
+          ? "border-violet-500 ring-2 ring-violet-500/80 shadow-xl shadow-violet-900/40"
+          : "border-[#1F2E45] hover:border-violet-500/50 hover:shadow-xl hover:shadow-violet-900/10"
+      }`}
     >
       {/* Cover Image Container */}
       <div className="relative aspect-[3/4] w-full bg-[#0E1524] overflow-hidden">
@@ -316,7 +358,13 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+            {isRecentlyRead && (
+              <span className="bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-md shadow-violet-600/40 flex items-center gap-0.5 animate-pulse">
+                <BookOpen className="w-2.5 h-2.5" />
+                <span>อ่านล่าสุด</span>
+              </span>
+            )}
             {manga.category && (
               <span
                 className={`backdrop-blur-md text-[10px] font-extrabold px-2 py-0.5 rounded-md shadow ${
@@ -335,8 +383,28 @@ export const MangaCard: React.FC<MangaCardProps> = ({
               </span>
             )}
             {manga.tier && manga.tier !== "none" && (
-              <span className="bg-amber-500/90 backdrop-blur-md text-black font-extrabold text-[11px] px-2 py-0.5 rounded-md shadow">
-                Tier {manga.tier}
+              <span
+                className={`backdrop-blur-md text-[10px] font-black px-2 py-0.5 rounded-md shadow ${
+                  manga.tier === "S"
+                    ? "bg-amber-400 text-black shadow-amber-400/30"
+                    : manga.tier === "A"
+                    ? "bg-orange-500 text-white shadow-orange-500/30"
+                    : manga.tier === "B"
+                    ? "bg-sky-500 text-white shadow-sky-500/30"
+                    : manga.tier === "C"
+                    ? "bg-emerald-600 text-white shadow-emerald-600/30"
+                    : "bg-amber-500/90 text-black"
+                }`}
+              >
+                {manga.tier === "S"
+                  ? "👑 S"
+                  : manga.tier === "A"
+                  ? "🔥 A"
+                  : manga.tier === "B"
+                  ? "✨ B"
+                  : manga.tier === "C"
+                  ? "👍 C"
+                  : manga.tier}
               </span>
             )}
           </div>

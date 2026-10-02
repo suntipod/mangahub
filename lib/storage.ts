@@ -487,6 +487,30 @@ export async function incrementChapter(id: string): Promise<Manga[]> {
     updated_at: new Date().toISOString(),
   };
 
+  if (typeof window !== "undefined") {
+    localStorage.setItem("mangahub_last_read_manga_id", id);
+  }
+
+  return upsertManga(updated);
+}
+
+// Touch manga last_read_at when user opens reader or clicks read
+export async function touchMangaRead(id: string): Promise<Manga[]> {
+  const current = getLocalMangas();
+  const target = current.find((m) => m.id === id);
+  if (!target) return current;
+
+  const now = new Date().toISOString();
+  if (typeof window !== "undefined") {
+    localStorage.setItem("mangahub_last_read_manga_id", id);
+  }
+
+  const updated: Manga = {
+    ...target,
+    last_read_at: now,
+    updated_at: now,
+  };
+
   return upsertManga(updated);
 }
 
@@ -508,6 +532,10 @@ export async function setChapter(id: string, chapterNumber: number): Promise<Man
     last_read_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+
+  if (typeof window !== "undefined") {
+    localStorage.setItem("mangahub_last_read_manga_id", id);
+  }
 
   return upsertManga(updated);
 }

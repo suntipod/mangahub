@@ -14,6 +14,7 @@ import {
   syncWithSupabase,
   syncWithServer,
   checkMangaOnlineUpdate,
+  touchMangaRead,
 } from "@/lib/storage";
 import {
   loadSupabaseConfig,
@@ -40,6 +41,7 @@ import {
   Check,
   LayoutGrid,
   StretchHorizontal,
+  Zap,
 } from "lucide-react";
 
 export default function Home() {
@@ -58,6 +60,8 @@ export default function Home() {
 
   // Filters & Search
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [selectedTier, setSelectedTier] = useState<string>("all");
+  const [lastReadMangaId, setLastReadMangaId] = useState<string | null>(null);
   const [availableCategories, setAvailableCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [currentTab, setCurrentTab] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -72,6 +76,9 @@ export default function Home() {
 
       const savedDiscreet = localStorage.getItem("mangahub_discreet_mode");
       if (savedDiscreet === "true") setIsDiscreetMode(true);
+
+      const savedLastRead = localStorage.getItem("mangahub_last_read_manga_id");
+      if (savedLastRead) setLastReadMangaId(savedLastRead);
     }
   }, []);
 
@@ -254,6 +261,21 @@ export default function Home() {
     setMangas(updated);
   };
 
+  // Open reader and update recently read
+  const handleOpenReader = async (manga: Manga) => {
+    setLastReadMangaId(manga.id);
+    const updated = await touchMangaRead(manga.id);
+    setMangas(updated);
+
+    const primarySource = manga.sources?.find((s) => s.is_primary) || manga.sources?.[0];
+    const targetUrl = primarySource?.current_chapter_url || primarySource?.base_url;
+    if (targetUrl) {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    } else {
+      setSelectedManga(manga);
+    }
+  };
+
   // Delete manga
   const handleDeleteManga = async (id: string) => {
     const updated = await removeManga(id);
@@ -269,6 +291,22 @@ export default function Home() {
     }
   };
 
+  // Find the most recently read manga
+  const recentlyReadManga = useMemo(() => {
+    if (mangas.length === 0) return null;
+    if (lastReadMangaId) {
+      const found = mangas.find((m) => m.id === lastReadMangaId);
+      if (found) return found;
+    }
+    const withRead = mangas.filter((m) => m.last_read_at);
+    if (withRead.length > 0) {
+      return [...withRead].sort(
+        (a, b) => new Date(b.last_read_at).getTime() - new Date(a.last_read_at).getTime()
+      )[0];
+    }
+    return null;
+  }, [mangas, lastReadMangaId]);
+
   // Filtered & Sorted Mangas
   const filteredMangas = useMemo(() => {
     return mangas
@@ -277,6 +315,13 @@ export default function Home() {
         if (selectedCategory !== "all") {
           const mangaCategory = m.category || "การ์ตูนทั่วไป";
           if (mangaCategory !== selectedCategory) {
+            return false;
+          }
+        }
+        // Tier filter
+        if (selectedTier !== "all") {
+          const mangaTier = m.tier || "none";
+          if (mangaTier !== selectedTier) {
             return false;
           }
         }
@@ -315,7 +360,7 @@ export default function Home() {
         }
         return 0;
       });
-  }, [mangas, selectedCategory, currentTab, searchQuery, sortBy]);
+  }, [mangas, selectedCategory, selectedTier, currentTab, searchQuery, sortBy]);
 
   // Counts for status tabs (respecting selectedCategory)
   const categoryScopedMangas = useMemo(() => {
@@ -330,6 +375,20 @@ export default function Home() {
   const readingCount = categoryScopedMangas.filter((m) => m.status === "reading").length;
   const onHoldCount = categoryScopedMangas.filter((m) => m.status === "on_hold").length;
   const completedCount = categoryScopedMangas.filter((m) => m.status === "completed").length;
+
+  const tierCounts = useMemo(() => {
+    const counts = { all: 0, S: 0, A: 0, B: 0, C: 0, none: 0 };
+    for (const m of categoryScopedMangas) {
+      counts.all++;
+      const t = m.tier || "none";
+      if (t === "S") counts.S++;
+      else if (t === "A") counts.A++;
+      else if (t === "B") counts.B++;
+      else if (t === "C") counts.C++;
+      else counts.none++;
+    }
+    return counts;
+  }, [categoryScopedMangas]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#090D16] text-gray-100 pb-24 sm:pb-12">
@@ -410,8 +469,123 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Category Filter Toolbar */}
+        {/* Recently Read Manga (Continue Reading Quick Hero) */}
+        {recentlyReadManga && (
+          <div className="relative overflow-hidden bg-gradient-to-r from-violet-950/40 via-[#131B2E] to-[#101726] border border-violet-500/40 rounded-2xl p-3.5 sm:p-4 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-3.5 animate-fade-in">
+            {/* Left side: Cover & Manga Info */}
+            <div className="flex items-center gap-3 w-full sm:w-auto min-w-0">
+              <div
+                onClick={() => setSelectedManga(recentlyReadManga)}
+                className="relative w-14 sm:w-16 aspect-[2/3] rounded-xl overflow-hidden bg-[#0A0E17] border border-violet-500/50 shrink-0 cursor-pointer shadow-md group"
+                title="คลิกดูรายละเอียดเรื่อง"
+              >
+                {recentlyReadManga.cover_url ? (
+                  <img
+                    src={recentlyReadManga.cover_url}
+                    alt={recentlyReadManga.title}
+                    referrerPolicy="no-referrer"
+                    className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
+                      isDiscreetMode &&
+                      (recentlyReadManga.category?.toLowerCase().includes("dojin") ||
+                        recentlyReadManga.category?.toLowerCase().includes("ntr"))
+                        ? "blur-md"
+                        : ""
+                    }`}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-violet-400">
+                    <BookOpen className="w-6 h-6" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                  <span className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm animate-pulse">
+                    <BookOpen className="w-3 h-3" />
+                    <span>กำลังอ่านอยู่ล่าสุด</span>
+                  </span>
+                  {recentlyReadManga.tier && recentlyReadManga.tier !== "none" && (
+                    <span
+                      className={`text-[10px] font-black px-1.5 py-0.5 rounded-md shadow ${
+                        recentlyReadManga.tier === "S"
+                          ? "bg-amber-400 text-black shadow-amber-400/30"
+                          : recentlyReadManga.tier === "A"
+                          ? "bg-orange-500 text-white shadow-orange-500/30"
+                          : recentlyReadManga.tier === "B"
+                          ? "bg-sky-500 text-white shadow-sky-500/30"
+                          : "bg-emerald-600 text-white shadow-emerald-600/30"
+                      }`}
+                    >
+                      {recentlyReadManga.tier === "S"
+                        ? "👑 Tier S"
+                        : recentlyReadManga.tier === "A"
+                        ? "🔥 Tier A"
+                        : recentlyReadManga.tier === "B"
+                        ? "✨ Tier B"
+                        : "👍 Tier C"}
+                    </span>
+                  )}
+                  {recentlyReadManga.category && (
+                    <span className="text-[10px] bg-[#1a253d] border border-[#2d3e61] text-gray-300 px-1.5 py-0.5 rounded-md font-medium">
+                      {recentlyReadManga.category}
+                    </span>
+                  )}
+                </div>
+
+                <h3
+                  onClick={() => setSelectedManga(recentlyReadManga)}
+                  className="text-sm sm:text-base font-bold text-white hover:text-violet-300 transition cursor-pointer truncate"
+                  title={recentlyReadManga.title}
+                >
+                  {recentlyReadManga.title}
+                </h3>
+
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5">
+                  <span className="text-violet-300 font-bold">
+                    อ่านถึงตอนที่ {recentlyReadManga.current_chapter}
+                  </span>
+                  {recentlyReadManga.latest_available_chapter ? (
+                    <span className="text-gray-400">
+                      / ล่าสุดในเว็บ {recentlyReadManga.latest_available_chapter}
+                    </span>
+                  ) : null}
+                  {recentlyReadManga.latest_available_chapter &&
+                    recentlyReadManga.latest_available_chapter > recentlyReadManga.current_chapter && (
+                      <span className="text-orange-400 font-extrabold flex items-center gap-0.5 text-[11px] animate-pulse">
+                        <Flame className="w-3 h-3 fill-current" />
+                        มีตอนใหม่!
+                      </span>
+                    )}
+                </div>
+              </div>
+            </div>
+
+            {/* Right side: Quick Action Buttons */}
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
+              <button
+                onClick={() => handleIncrementChapter(recentlyReadManga.id)}
+                className="px-3 py-2 bg-[#182338] hover:bg-[#223250] text-gray-200 border border-[#27385a] rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1 shrink-0"
+                title="เพิ่มเลขตอนที่อ่าน +1 ตอน"
+              >
+                <Plus className="w-3.5 h-3.5 text-violet-400" />
+                <span>+1 ตอน</span>
+              </button>
+
+              <button
+                onClick={() => handleOpenReader(recentlyReadManga)}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-violet-600/30 transition active:scale-95"
+              >
+                <Zap className="w-4 h-4 fill-current text-amber-300" />
+                <span>อ่านต่อตอนที่ {recentlyReadManga.current_chapter} ⚡</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Category & Tier Filter Toolbar */}
         <div className="space-y-2.5 pt-1">
+          {/* Category Filter Bar */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
             <button
               onClick={() => setSelectedCategory("all")}
@@ -457,6 +631,85 @@ export default function Home() {
                 </button>
               );
             })}
+          </div>
+
+          {/* Tier Filter Bar */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            <span className="text-[11px] font-bold text-gray-400 shrink-0 mr-1 flex items-center gap-1">
+              <span>🏆 Tier:</span>
+            </span>
+
+            <button
+              onClick={() => setSelectedTier("all")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1 ${
+                selectedTier === "all"
+                  ? "bg-gray-200 text-gray-900 shadow-md font-extrabold"
+                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+              }`}
+            >
+              <span>⭐ ทั้งหมด</span>
+              <span className="text-[10px] opacity-75">({tierCounts.all})</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedTier("S")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                selectedTier === "S"
+                  ? "bg-amber-400 text-black shadow-md shadow-amber-400/30 font-black"
+                  : "bg-amber-950/20 text-amber-300 hover:bg-amber-950/40 border border-amber-600/40"
+              }`}
+            >
+              <span>👑 Tier S</span>
+              <span className="text-[10px] opacity-80">({tierCounts.S})</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedTier("A")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                selectedTier === "A"
+                  ? "bg-orange-500 text-white shadow-md shadow-orange-500/30 font-black"
+                  : "bg-orange-950/20 text-orange-300 hover:bg-orange-950/40 border border-orange-600/40"
+              }`}
+            >
+              <span>🔥 Tier A</span>
+              <span className="text-[10px] opacity-80">({tierCounts.A})</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedTier("B")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                selectedTier === "B"
+                  ? "bg-sky-500 text-white shadow-md shadow-sky-500/30 font-black"
+                  : "bg-sky-950/20 text-sky-300 hover:bg-sky-950/40 border border-sky-600/40"
+              }`}
+            >
+              <span>✨ Tier B</span>
+              <span className="text-[10px] opacity-80">({tierCounts.B})</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedTier("C")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                selectedTier === "C"
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-black"
+                  : "bg-emerald-950/20 text-emerald-300 hover:bg-emerald-950/40 border border-emerald-600/40"
+              }`}
+            >
+              <span>👍 Tier C</span>
+              <span className="text-[10px] opacity-80">({tierCounts.C})</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedTier("none")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                selectedTier === "none"
+                  ? "bg-gray-600 text-white shadow-md font-bold"
+                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+              }`}
+            >
+              <span>⚪ ไม่ระบุ</span>
+              <span className="text-[10px] opacity-75">({tierCounts.none})</span>
+            </button>
           </div>
 
           {/* Status Tabs & Sorting Toolbar */}
@@ -581,9 +834,11 @@ export default function Home() {
                 manga={manga}
                 viewMode={viewMode}
                 isDiscreetMode={isDiscreetMode}
+                isRecentlyRead={manga.id === recentlyReadManga?.id}
                 onSelect={(m) => setSelectedManga(m)}
                 onIncrement={handleIncrementChapter}
                 onSyncToLatest={handleSyncToLatest}
+                onOpenReader={handleOpenReader}
               />
             ))}
           </div>
