@@ -50,6 +50,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [newSourceName, setNewSourceName] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Cover image states
   const [coverUrl, setCoverUrl] = useState(manga.cover_url || "");
@@ -62,6 +63,22 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
     setTriedDetailProxy(false);
     setCoverImgError(false);
   }, [coverUrl]);
+
+  // Synchronize state when manga prop changes
+  useEffect(() => {
+    if (manga) {
+      setCurrentChapter(manga.current_chapter);
+      setStatus(manga.status);
+      setTier(manga.tier);
+      setCategory(manga.category || "การ์ตูนทั่วไป");
+      setNotes(manga.notes || "");
+      setSources(manga.sources || []);
+      setCoverUrl(manga.cover_url || "");
+      setDisplayCover(manga.cover_url || "");
+      setLatestChapter(manga.latest_available_chapter);
+      setSearchCoverQuery(manga.title);
+    }
+  }, [manga]);
 
   const [searchCoverQuery, setSearchCoverQuery] = useState(manga.title);
   const [isSearchingCover, setIsSearchingCover] = useState(false);
@@ -191,7 +208,8 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   };
 
   // Save changes
-  const handleSave = () => {
+  const handleSave = async () => {
+    setIsSaving(true);
     const updated: Manga = {
       ...manga,
       cover_url: coverUrl.trim(),
@@ -205,12 +223,18 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       last_read_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    onUpdate(updated);
-    setSavedSuccess(true);
-    setTimeout(() => {
-      setSavedSuccess(false);
-      onClose();
-    }, 400);
+    try {
+      await onUpdate(updated);
+    } catch (e) {
+      console.error("Save error:", e);
+    } finally {
+      setIsSaving(false);
+      setSavedSuccess(true);
+      setTimeout(() => {
+        setSavedSuccess(false);
+        onClose();
+      }, 500);
+    }
   };
 
   return (
@@ -695,12 +719,18 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
             </button>
             <button
               onClick={handleSave}
-              className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-violet-600 hover:bg-violet-500 shadow-md shadow-violet-600/30 transition active:scale-95"
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-60 shadow-md shadow-violet-600/30 transition active:scale-95"
             >
-              {savedSuccess ? (
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>กำลังบันทึกลงฐานข้อมูล...</span>
+                </>
+              ) : savedSuccess ? (
                 <>
                   <Check className="w-4 h-4 text-emerald-300" />
-                  <span>บันทึกแล้ว!</span>
+                  <span>บันทึกสำเร็จเรียบร้อย!</span>
                 </>
               ) : (
                 <span>บันทึกการเปลี่ยนแปลง</span>

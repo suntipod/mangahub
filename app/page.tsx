@@ -147,9 +147,10 @@ export default function Home() {
           try {
             const remote = await fetchRemoteMangas(client);
             if (remote && remote.length > 0) {
-              const deduped = deduplicateMangas(remote);
-              setMangas(deduped);
-              saveLocalMangas(deduped);
+              const local = getLocalMangas();
+              const merged = deduplicateMangas([...local, ...remote]);
+              setMangas(merged);
+              saveLocalMangas(merged);
             }
           } catch (e) {
             console.error("Realtime fetch error:", e);

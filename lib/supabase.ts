@@ -177,19 +177,19 @@ export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): P
     id: mangaId,
     title: manga.title,
     alt_title: manga.alt_title,
-    cover_url: manga.cover_url,
+    cover_url: manga.cover_url?.trim() || null,
     current_chapter: manga.current_chapter,
     latest_available_chapter: manga.latest_available_chapter,
     status: manga.status,
     tier: manga.tier,
     notes: encodedNotes,
     last_read_at: manga.last_read_at,
-    updated_at: new Date().toISOString(),
+    updated_at: manga.updated_at || new Date().toISOString(),
   });
 
   if (mError) throw mError;
 
-  // Upsert sources
+  // Upsert sources: cleanly replace sources so backup links and primary flags stay in sync
   if (manga.sources && manga.sources.length > 0) {
     const sourcesToUpsert = manga.sources.map((s) => ({
       id: ensureUUID(s.id),
@@ -200,6 +200,10 @@ export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): P
       is_primary: s.is_primary,
       is_active: s.is_active,
     }));
+
+    try {
+      await client.from("manga_sources").delete().eq("manga_id", mangaId);
+    } catch {}
 
     const { error: sError } = await client.from("manga_sources").upsert(sourcesToUpsert);
     if (sError) throw sError;
