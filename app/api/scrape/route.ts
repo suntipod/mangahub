@@ -94,20 +94,33 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
   try {
     const parsed = new URL(urlString);
 
-    // 1. Google search URL -> Extract search query
-    if (parsed.hostname.includes("google.") && parsed.searchParams.has("q")) {
-      const q = parsed.searchParams.get("q") || "";
-      const cleanedQuery = cleanTitle(q);
-      return { title: cleanedQuery, isJunk: false };
+    // 1. Identify non-manga domains (Google, Shopee, government sites, social media, app domain)
+    const JUNK_DOMAINS = [
+      "google.",
+      "shopee.",
+      "lazada.",
+      "cad.go.th",
+      "mdes.go.th",
+      "smart4m",
+      "facebook.com",
+      "instagram.com",
+      "twitter.com",
+      "x.com",
+      "tiktok.com",
+      "youtube.com",
+      "youtu.be",
+      "vercel.app",
+    ];
+    if (JUNK_DOMAINS.some((d) => parsed.hostname.toLowerCase().includes(d))) {
+      return { title: "", isJunk: true };
     }
 
-    // 2. Identify non-manga URLs (homepages, top-up, search, etc.)
-    const pathname = parsed.pathname;
+    // 2. Identify utility URLs (homepages, top-up, auth, search pages, catalog roots)
+    const pathname = parsed.pathname.replace(/\/$/, "");
     if (
-      pathname === "/" ||
       pathname === "" ||
-      /^\/(?:topup|search|comics|manga|page\/\d+)\/?$/i.test(pathname) ||
-      parsed.hostname.includes("vercel.app")
+      /^\/(?:topup|payments?|auth|login|signin|register|search|comics?|manga|page\/\d+)$/i.test(pathname) ||
+      (parsed.searchParams.has("s") && parsed.searchParams.get("s") && pathname === "")
     ) {
       return { title: "", isJunk: true };
     }
@@ -255,7 +268,7 @@ export async function POST(req: NextRequest) {
     if (urlDerived.isJunk) {
       return NextResponse.json({
         success: false,
-        error: "ลิงก์นี้เป็นหน้าหมวดหมู่, ค้นหา หรือหน้าแรก ไม่ใช่ตอนของการ์ตูน",
+        error: "ลิงก์นี้ไม่ใช่หน้าการ์ตูน (เป็นหน้าค้นหา, หน้าแรก, หน้าชำระเงิน หรือไม่ใช่เว็บอ่านการ์ตูน)",
       });
     }
 

@@ -2,6 +2,7 @@ import { Manga, MangaSource } from "@/types/manga";
 import { getSupabaseClient, syncMangaToRemote, deleteRemoteManga, fetchRemoteMangas } from "./supabase";
 
 const LOCAL_STORAGE_KEY = "mangahub_local_mangas";
+const STORAGE_CLEAN_VERSION_KEY = "mangahub_cleaned_v3";
 
 // Helper to normalize manga title for robust duplicate detection
 export function normalizeTitle(title: string): string {
@@ -11,72 +12,177 @@ export function normalizeTitle(title: string): string {
     .trim();
 }
 
-// Helper to remove duplicates across ID, normalized title, and primary source URL
+// Clean title of translation/chapter/site suffixes for matching
+export function cleanTitleForMatch(title: string): string {
+  if (!title) return "";
+  return title
+    .replace(/(?:ตอนที่|ch|chapter|ep|episode)\s*\d+(?:\.\d+)?/gi, "")
+    .replace(/แปลไทย|จบแล้ว|จบss|รอจีนอัพ|มังงะออนไลน์|อ่านออนไลน์/g, "")
+    .replace(/\|\s*[^|]+$/g, "")
+    .replace(/\s*-\s*(?:Oremanga|ReadToon|Kairew|Go-Manga|Up-Manga|Speed-Manga|Sing-Manga|Fin-Manga|Public Manga|DukeToon|Bully-Manga).*/gi, "")
+    .replace(/[-–—]\s*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Helper to extract core slug from URL for matching across different sites
+export function extractCoreSlug(urlStr: string): string {
+  if (!urlStr) return "";
+  try {
+    const u = new URL(urlStr);
+    const parts = decodeURIComponent(u.pathname).split("/").filter(Boolean);
+    const ignore = /^(?:manga|comic|comics|cartoon|cartoons|read|reader|book|books|episode|series|content)$/i;
+    const meaningful = parts.filter((p) => !ignore.test(p) && !/^\d+$/.test(p));
+    let last = meaningful.pop() || "";
+    last = last.replace(/[-_]?(?:chapter|ch|ep|episode|ตอนที่|ตอน)?[-_]?\d+(?:\.\d+)?$/i, "");
+    last = last.replace(/[-_]?(?:แปลไทย|raw|thai).*$/i, "");
+    last = last.replace(/^\d+[-_]/, "");
+    return last.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  } catch {
+    return "";
+  }
+}
+
+// Check if a manga or URL is junk (non-manga utility or error page)
+export function isJunkManga(m: Manga): boolean {
+  if (!m || !m.title) return true;
+  const sources = m.sources || [];
+  if (sources.length === 0) return true;
+
+  const JUNK_DOMAINS = [
+    "shopee.",
+    "google.",
+    "cad.go.th",
+    "mdes.go.th",
+    "smart4m",
+    "mangahub-seven.vercel.app",
+    "facebook.com",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+  ];
+
+  for (const s of sources) {
+    const urlStr = s.base_url || s.current_chapter_url || (s as any).url || "";
+    try {
+      const u = new URL(urlStr);
+      if (JUNK_DOMAINS.some((d) => u.hostname.includes(d))) return true;
+      const p = u.pathname.replace(/\/$/, "");
+      if (p === "" || /^\/(?:manga|comics|comic|read|page\/\d+|topup|payments?|auth|login|signin|register|search)$/i.test(p)) {
+        return true;
+      }
+      if (u.searchParams.has("s") && u.searchParams.get("s") && p === "") {
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+
+  const cleanT = m.title.trim();
+  if (["เข้าสู่ระบบ", "Google Search", "Shp App Link", "MangaHub", "การ์ตูนเรื่องที่ 43", "/", "Up", "Fin"].includes(cleanT)) {
+    return true;
+  }
+
+  return false;
+}
+
+// Check if two manga entries refer to the same story across sites
+export function areMangasEquivalent(a: Manga, b: Manga): boolean {
+  if (!a || !b) return false;
+  if (a.id === b.id) return true;
+
+  const tA = cleanTitleForMatch(a.title);
+  const tB = cleanTitleForMatch(b.title);
+  const normA = normalizeTitle(tA);
+  const normB = normalizeTitle(tB);
+
+  if (normA && normB) {
+    if (normA === normB) return true;
+    if (normA.length > 8 && normB.length > 8) {
+      if (normA.includes(normB) || normB.includes(normA)) {
+        return true;
+      }
+    }
+  }
+
+  const slugsA = (a.sources || []).map((s) => extractCoreSlug(s.base_url || s.current_chapter_url || (s as any).url || "")).filter((s) => s.length >= 5);
+  const slugsB = (b.sources || []).map((s) => extractCoreSlug(s.base_url || s.current_chapter_url || (s as any).url || "")).filter((s) => s.length >= 5);
+
+  for (const sa of slugsA) {
+    for (const sb of slugsB) {
+      if (sa === sb) return true;
+      if (sa.length >= 10 && sb.length >= 10 && (sa.includes(sb) || sb.includes(sa))) {
+        return true;
+      }
+    }
+  }
+
+  const aliases = [
+    ["returnofthesssclassranker", "thesssrankerreturns", "returnsssclass", "returnsssclassranker"],
+    ["ibecamethetyrantofadefensegame", "ibecamethetyrantofadefencegame"],
+    ["demonicevolution", "demonicevolution140"],
+    ["sololeveling"],
+    ["theworldsbestengineer", "worldsbestengineer"],
+  ];
+
+  for (const group of aliases) {
+    const matchA = group.some((x) => normA.includes(x) || slugsA.some((s) => s.includes(x)));
+    const matchB = group.some((x) => normB.includes(x) || slugsB.some((s) => s.includes(x)));
+    if (matchA && matchB) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Helper to remove duplicates across ID, title containment, and URL slugs
 export function deduplicateMangas(mangas: Manga[]): Manga[] {
   if (!Array.isArray(mangas)) return [];
+  const valid = mangas.filter((m) => !isJunkManga(m));
   const result: Manga[] = [];
-  const seenIds = new Set<string>();
-  const seenTitles = new Map<string, Manga>();
-  const seenUrls = new Map<string, Manga>();
 
-  for (const m of mangas) {
+  for (const m of valid) {
     if (!m || !m.title) continue;
-    const normTitle = normalizeTitle(m.title);
-    const primaryUrl = (
-      m.sources?.find((s) => s.is_primary)?.base_url ||
-      m.sources?.[0]?.base_url ||
-      ""
-    )
-      .toLowerCase()
-      .replace(/\/$/, "");
 
-    let existing: Manga | undefined = undefined;
-    if (seenIds.has(m.id)) {
-      existing = result.find((x) => x.id === m.id);
-    } else if (normTitle && seenTitles.has(normTitle)) {
-      existing = seenTitles.get(normTitle);
-    } else if (primaryUrl && seenUrls.has(primaryUrl)) {
-      existing = seenUrls.get(primaryUrl);
-    }
+    const existingIdx = result.findIndex((existing) => areMangasEquivalent(existing, m));
 
-    if (!existing) {
-      seenIds.add(m.id);
-      if (normTitle) seenTitles.set(normTitle, m);
-      if (primaryUrl) seenUrls.set(primaryUrl, m);
+    if (existingIdx === -1) {
       result.push(m);
     } else {
-      // Merge best attributes
+      const existing = result[existingIdx];
       const isUuid = (id: string) =>
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-      const bestId = isUuid(existing.id)
-        ? existing.id
-        : isUuid(m.id)
-        ? m.id
-        : existing.id;
+      const bestId = isUuid(existing.id) ? existing.id : isUuid(m.id) ? m.id : existing.id;
 
-      const useCurrent =
-        new Date(m.updated_at || 0).getTime() >
-        new Date(existing.updated_at || 0).getTime();
-      const baseWinner = useCurrent ? m : existing;
+      // Pick best descriptive title (e.g. Thai + English or longer title)
+      const bestTitle = (m.title.length > existing.title.length && !m.title.includes(" - "))
+        ? m.title
+        : existing.title;
 
       // Merge sources cleanly without duplicate URLs
       const combinedSources = [...(existing.sources || [])];
       (m.sources || []).forEach((s) => {
-        const hasMatch = combinedSources.some(
-          (cs) =>
-            (cs.base_url && s.base_url && cs.base_url.toLowerCase() === s.base_url.toLowerCase()) ||
-            (cs.site_name && s.site_name && cs.site_name === s.site_name)
-        );
+        const sUrl = (s.base_url || s.current_chapter_url || "").toLowerCase().replace(/\/$/, "");
+        const hasMatch = combinedSources.some((cs) => {
+          const csUrl = (cs.base_url || cs.current_chapter_url || "").toLowerCase().replace(/\/$/, "");
+          return (
+            (csUrl && sUrl && csUrl === sUrl) ||
+            (cs.site_name && s.site_name && cs.site_name.toLowerCase() === s.site_name.toLowerCase())
+          );
+        });
         if (!hasMatch) combinedSources.push(s);
       });
 
       const mergedManga: Manga = {
-        ...baseWinner,
+        ...existing,
+        ...m,
         id: bestId,
+        title: bestTitle,
         current_chapter: Math.max(existing.current_chapter || 0, m.current_chapter || 0),
         latest_available_chapter:
-          Math.max(existing.latest_available_chapter || 0, m.latest_available_chapter || 0) ||
-          undefined,
+          Math.max(existing.latest_available_chapter || 0, m.latest_available_chapter || 0) || undefined,
         sources: combinedSources,
         notes: existing.notes || m.notes,
         category: existing.category || m.category,
@@ -89,13 +195,7 @@ export function deduplicateMangas(mangas: Manga[]): Manga[] {
         ).toISOString(),
       };
 
-      const targetIdx = result.findIndex((x) => x.id === existing!.id);
-      if (targetIdx >= 0) {
-        result[targetIdx] = mergedManga;
-      }
-      seenIds.add(bestId);
-      if (normTitle) seenTitles.set(normTitle, mergedManga);
-      if (primaryUrl) seenUrls.set(primaryUrl, mergedManga);
+      result[existingIdx] = mergedManga;
     }
   }
 
@@ -136,11 +236,24 @@ export async function syncWithServer(): Promise<Manga[]> {
     const json = await res.json();
     const serverMangas: Manga[] = json.data || [];
 
+    // One-time client migration: purge obsolete local caches with cleaned server list
+    if (typeof window !== "undefined" && localStorage.getItem(STORAGE_CLEAN_VERSION_KEY) !== "true" && serverMangas.length > 0) {
+      const cleanList = deduplicateMangas(serverMangas);
+      saveLocalMangas(cleanList);
+      localStorage.setItem(STORAGE_CLEAN_VERSION_KEY, "true");
+      return cleanList;
+    }
+
     const localMangas = getLocalMangas();
 
-    // Check if there are local mangas on this device that are NOT yet on the server
+    // Check if there are local mangas on this device that are NOT yet on the server and are NOT junk or duplicates
     const serverIds = new Set(serverMangas.map((m) => m.id));
-    const unuploaded = localMangas.filter((m) => !serverIds.has(m.id));
+    const unuploaded = localMangas.filter(
+      (m) =>
+        !isJunkManga(m) &&
+        !serverIds.has(m.id) &&
+        !serverMangas.some((sm) => areMangasEquivalent(sm, m))
+    );
 
     if (unuploaded.length > 0) {
       // Automatically push newly added local mangas (from iPhone) to server!
@@ -199,6 +312,15 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
 
   try {
     const remoteMangas = await fetchRemoteMangas(client);
+
+    // One-time client migration: purge obsolete local caches with cleaned Supabase list
+    if (typeof window !== "undefined" && localStorage.getItem(STORAGE_CLEAN_VERSION_KEY) !== "true" && remoteMangas.length > 0) {
+      const cleanList = deduplicateMangas(remoteMangas);
+      saveLocalMangas(cleanList);
+      localStorage.setItem(STORAGE_CLEAN_VERSION_KEY, "true");
+      return { synced: cleanList.length };
+    }
+
     const localMangas = getLocalMangas();
 
     // Deduplicate combined remote and local by ID, title, and source URL
@@ -216,8 +338,14 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
 
     // Only push items to remote that are truly new or updated locally
     for (const m of mergedList) {
+      if (isJunkManga(m)) continue;
       const remoteItem = remoteMangas.find((rm) => rm.id === m.id);
-      if (!remoteItem || new Date(m.updated_at).getTime() > new Date(remoteItem.updated_at).getTime()) {
+      if (remoteItem) {
+        if (new Date(m.updated_at).getTime() > new Date(remoteItem.updated_at).getTime()) {
+          await syncMangaToRemote(client, m);
+        }
+      } else if (!remoteMangas.some((rm) => areMangasEquivalent(rm, m))) {
+        // Truly newly created local manga not yet in Supabase
         await syncMangaToRemote(client, m);
       }
     }

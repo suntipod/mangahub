@@ -3,13 +3,13 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { Manga } from "@/types/manga";
+import { deduplicateMangas, isJunkManga } from "@/lib/storage";
 
 const DATA_DIR = process.env.VERCEL
   ? path.join(os.tmpdir(), "mangahub-data")
   : path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "mangas.json");
-
-const INITIAL_MANGAS: Manga[] = [];
+const BUNDLED_FILE = path.join(process.cwd(), "data", "mangas.json");
 
 let memoryCache: Manga[] = [];
 
@@ -19,8 +19,17 @@ function readServerData(): Manga[] {
       const raw = fs.readFileSync(DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        memoryCache = parsed;
-        return parsed;
+        memoryCache = deduplicateMangas(parsed);
+        return memoryCache;
+      }
+    }
+    // Fallback to bundled data file if DATA_FILE not present yet (e.g. on Vercel cold boot)
+    if (fs.existsSync(BUNDLED_FILE)) {
+      const raw = fs.readFileSync(BUNDLED_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        memoryCache = deduplicateMangas(parsed);
+        return memoryCache;
       }
     }
   } catch (e) {
@@ -30,12 +39,13 @@ function readServerData(): Manga[] {
 }
 
 function writeServerData(data: Manga[]): void {
-  memoryCache = data;
+  const cleanData = deduplicateMangas(data);
+  memoryCache = cleanData;
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
+    fs.writeFileSync(DATA_FILE, JSON.stringify(cleanData, null, 2), "utf-8");
   } catch (e) {
     // In serverless environments, writing to disk might fail; memory cache persists during instance lifetime
   }
@@ -58,6 +68,7 @@ export async function POST(req: NextRequest) {
     if (Array.isArray(body)) {
       // Batch sync
       body.forEach((item: Manga) => {
+        if (!item || isJunkManga(item)) return;
         const existing = map.get(item.id);
         if (!existing || new Date(item.updated_at) >= new Date(existing.updated_at)) {
           map.set(item.id, item);
@@ -66,15 +77,17 @@ export async function POST(req: NextRequest) {
     } else if (body && body.id) {
       // Single upsert
       const item = body as Manga;
-      map.set(item.id, {
-        ...item,
-        updated_at: new Date().toISOString(),
-      });
+      if (!isJunkManga(item)) {
+        map.set(item.id, {
+          ...item,
+          updated_at: new Date().toISOString(),
+        });
+      }
     } else {
       return NextResponse.json({ success: false, error: "Invalid payload" }, { status: 400 });
     }
 
-    const updatedList = Array.from(map.values()).sort(
+    const updatedList = deduplicateMangas(Array.from(map.values())).sort(
       (a, b) => new Date(b.last_read_at).getTime() - new Date(a.last_read_at).getTime()
     );
 
