@@ -237,6 +237,22 @@ function deriveSeriesUrl(urlStr: string): string | null {
   return null;
 }
 
+// Statistical outlier filter to remove rogue typos (e.g. [1255, 211, 210, ...] -> 1255 is an anomaly)
+function filterChapterOutliers(chapters: number[]): number[] {
+  if (chapters.length < 3) return chapters;
+  const sorted = Array.from(new Set(chapters)).sort((a, b) => b - a);
+  while (
+    sorted.length >= 3 &&
+    sorted[0] > 100 &&
+    sorted[1] > 0 &&
+    sorted[0] > sorted[1] * 2 &&
+    sorted[0] - sorted[1] > 50
+  ) {
+    sorted.shift();
+  }
+  return sorted;
+}
+
 // Extract chapters strictly belonging to this manga
 function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentChapter: number = 1): number[] {
   const $ = cheerio.load(html);
@@ -262,7 +278,6 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
     if (containers.length > 0) {
       containers.each((_, container) => {
         $(container).find("li, .chapter-item, a, .eph-num, .wp-manga-chapter").each((_, item) => {
-          const text = $(item).find(".chapternum, .chapter-manhwa-title").text().trim() || $(item).text().trim();
           const href = $(item).attr("href") || $(item).find("a").attr("href") || "";
 
           // If href points to a completely different series slug, ignore it!
@@ -279,27 +294,55 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
             }
           }
 
-          // Match chapter pattern in text
-          const mText = text.match(/(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i);
-          if (mText) {
-            const num = parseFloat(mText[1]);
-            if (isReasonable(num)) foundChapters.add(num);
-          }
+          const explicitNumEl = $(item).find(".chapternum, .chapter-manhwa-title");
+          const cloned = $(item).clone();
+          cloned.find("span, div, b, small, p").each((_, subEl) => {
+            const subText = $(subEl).text();
+            if (/เหรียญ|บาท|coins?|baht/i.test(subText)) {
+              $(subEl).remove();
+            }
+          });
+          const cleanText = cloned.text().trim().replace(/\d+\s*(?:เหรียญ|coins?|บาท|baht)/gi, "");
 
-          // Match chapter pattern in href
+          // Match chapter pattern in text and in href
+          const mText = (explicitNumEl.text().trim() || cleanText).match(
+            /(?:ตอนที่|ตอน|chapter|ch|ep|episode)\s*[:=.-]?\s*(\d+(?:\.\d+)?)/i
+          );
           const mHref =
             href.match(/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/](\d+(?:\.\d+)?)/i) ||
             href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/) ||
             href.match(/\/(\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
-          if (mHref) {
-            const num = parseFloat(mHref[1]);
-            if (isReasonable(num)) foundChapters.add(num);
+
+          let chosenNum: number | null = null;
+          if (mText && mHref) {
+            const tNum = parseFloat(mText[1]);
+            const hNum = parseFloat(mHref[1]);
+            if (tNum === hNum) {
+              chosenNum = tNum;
+            } else if (hNum.toString().startsWith(tNum.toString()) && hNum > tNum) {
+              // Slug has typo/extra digit (e.g. href has "...-1255/" but visible text in .chapternum is "ตอนที่ 125") -> Trust visible text 125!
+              chosenNum = tNum;
+            } else if (tNum.toString().startsWith(hNum.toString()) && tNum > hNum) {
+              // Text had coin badge concatenation (e.g. "ตอนที่ 1662" vs href "/166") -> Trust href 166!
+              chosenNum = hNum;
+            } else {
+              // Prefer explicit .chapternum if present, else href
+              chosenNum = explicitNumEl.length > 0 ? tNum : hNum;
+            }
+          } else if (mText) {
+            chosenNum = parseFloat(mText[1]);
+          } else if (mHref) {
+            chosenNum = parseFloat(mHref[1]);
+          }
+
+          if (chosenNum !== null && isReasonable(chosenNum)) {
+            foundChapters.add(chosenNum);
           }
         });
       });
 
       if (foundChapters.size > 0) {
-        return Array.from(foundChapters);
+        return filterChapterOutliers(Array.from(foundChapters));
       }
     }
   }
@@ -318,7 +361,7 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
   });
 
   if (foundChapters.size > 0) {
-    return Array.from(foundChapters);
+    return filterChapterOutliers(Array.from(foundChapters));
   }
 
   // 3. THIRD PRIORITY: Fallback to General Links with Strict Slug Filtering
@@ -353,26 +396,31 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
       href.match(/[-_](\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/) ||
       href.match(/\/(\d+(?:\.\d+)?)\/?(?:#.*|\?.*)?$/);
 
+    let chosenNum: number | null = null;
     if (hrefMatch && textMatch) {
       const hNum = parseFloat(hrefMatch[1]);
       const tNum = parseFloat(textMatch[1]);
-      // If text concatenation caused a spurious extra digit like 1662 from 166 + 2 coins
-      if (tNum.toString().startsWith(hNum.toString()) && tNum > hNum) {
-        if (isReasonable(hNum)) foundChapters.add(hNum);
+      if (tNum === hNum) {
+        chosenNum = tNum;
+      } else if (hNum.toString().startsWith(tNum.toString()) && hNum > tNum) {
+        chosenNum = tNum;
+      } else if (tNum.toString().startsWith(hNum.toString()) && tNum > hNum) {
+        chosenNum = hNum;
       } else {
-        if (isReasonable(tNum)) foundChapters.add(tNum);
-        if (isReasonable(hNum)) foundChapters.add(hNum);
+        chosenNum = hNum;
       }
     } else if (textMatch) {
-      const num = parseFloat(textMatch[1]);
-      if (isReasonable(num)) foundChapters.add(num);
+      chosenNum = parseFloat(textMatch[1]);
     } else if (hrefMatch) {
-      const num = parseFloat(hrefMatch[1]);
-      if (isReasonable(num)) foundChapters.add(num);
+      chosenNum = parseFloat(hrefMatch[1]);
+    }
+
+    if (chosenNum !== null && isReasonable(chosenNum)) {
+      foundChapters.add(chosenNum);
     }
   });
 
-  return Array.from(foundChapters);
+  return filterChapterOutliers(Array.from(foundChapters));
 }
 
 // Fetch helper with standard browser headers and timeout
@@ -480,15 +528,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (checkedChapters.length > 0) {
-      const highest = Math.max(...checkedChapters);
+    const validChapters = filterChapterOutliers(checkedChapters);
+
+    if (validChapters.length > 0) {
+      const highest = Math.max(...validChapters);
       const hasUpdate = highest > Number(currentChapter);
       return NextResponse.json({
         success: true,
         latestChapter: highest,
         currentChapter: Number(currentChapter),
         hasUpdate,
-        totalDetectedChapters: checkedChapters.length,
+        totalDetectedChapters: validChapters.length,
       });
     }
 
