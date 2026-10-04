@@ -237,15 +237,31 @@ function getSeriesCandidates(urlStr: string): string[] {
       (segments[0] === "manga" || segments[0] === "series" || segments[0] === "comic" || segments[0] === "content");
 
     const candidates: string[] = [];
+
+    // Domain-specific fast paths
+    if (u.hostname.includes("whytoon.com")) {
+      const m = pathname.match(/\/content\/([^\/]+)/);
+      if (m) {
+        candidates.push(`${u.origin}/content/${m[1]}`);
+        candidates.push(`${u.origin}/content/${m[1]}/`);
+      }
+    }
+
     if (isAlreadyRoot) {
+      candidates.push(`${u.origin}/${segments[0]}/${segments[1]}`);
       candidates.push(`${u.origin}/${segments[0]}/${segments[1]}/`);
     } else if (slug && slug !== "manga" && slug !== "series" && slug !== "comic" && slug !== "content") {
-      // Prioritize WordPress Manga themes (/manga/, /series/, /comic/, /content/, /{slug}/)
-      candidates.push(`${u.origin}/manga/${slug}/`);
-      candidates.push(`${u.origin}/series/${slug}/`);
-      candidates.push(`${u.origin}/comic/${slug}/`);
+      // Prioritize modern Next.js/WordPress Manga themes (/content/, /manga/, /series/, /comic/, /{slug}/)
+      candidates.push(`${u.origin}/content/${slug}`);
       candidates.push(`${u.origin}/content/${slug}/`);
+      candidates.push(`${u.origin}/manga/${slug}/`);
+      candidates.push(`${u.origin}/manga/${slug}`);
+      candidates.push(`${u.origin}/series/${slug}/`);
+      candidates.push(`${u.origin}/series/${slug}`);
+      candidates.push(`${u.origin}/comic/${slug}/`);
+      candidates.push(`${u.origin}/comic/${slug}`);
       candidates.push(`${u.origin}/${slug}/`);
+      candidates.push(`${u.origin}/${slug}`);
     }
 
     return Array.from(new Set(candidates));
@@ -574,6 +590,29 @@ export async function POST(req: NextRequest) {
 
     if (validChapters.length > 0) {
       const highest = Math.max(...validChapters);
+
+      // Crucial guard: If the URL is a chapter reader page (e.g. /27 or /chapter-27),
+      // and we ONLY detected 1 chapter that matches the URL's own chapter,
+      // and couldn't find higher chapters or a table of contents:
+      // That means we only scanned the reader page itself linking to itself!
+      // We must NOT falsely report that the latest chapter on the web is the chapter the user is currently reading!
+      const urlChapter = extractChapterFromUrl(parsedUrl.href);
+      if (
+        hasChapterInPath &&
+        urlChapter &&
+        validChapters.length === 1 &&
+        highest === urlChapter
+      ) {
+        return NextResponse.json({
+          success: false,
+          error: "ไม่สามารถเข้าถึงหน้าสารบัญตอนทั้งหมดได้ (หน้าเว็บอาจมีการป้องกันหรือปิดปรับปรุง)",
+          latestChapter: null,
+          currentChapter: Number(currentChapter),
+          hasUpdate: false,
+          totalDetectedChapters: 0,
+        });
+      }
+
       const hasUpdate = highest > Number(currentChapter);
       return NextResponse.json({
         success: true,
