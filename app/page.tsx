@@ -175,6 +175,12 @@ export default function Home() {
         })
         .catch(() => {
           setSyncStatus("offline");
+          // Fallback to server sync if Supabase is unreachable/blocked
+          syncWithServer().then((serverData) => {
+            if (serverData && serverData.length > 0) {
+              setMangas(serverData);
+            }
+          });
         });
     } else {
       setSyncStatus("disabled");

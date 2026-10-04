@@ -47,8 +47,14 @@ export function extractCoreSlug(urlStr: string): string {
 // Check if a manga or URL is junk (non-manga utility or error page)
 export function isJunkManga(m: Manga): boolean {
   if (!m || !m.title) return true;
+  const cleanT = m.title.trim();
+  if (!cleanT || ["เข้าสู่ระบบ", "Google Search", "Shp App Link", "MangaHub", "การ์ตูนเรื่องที่ 43", "/", "Up", "Fin"].includes(cleanT)) {
+    return true;
+  }
+
   const sources = m.sources || [];
-  if (sources.length === 0) return true;
+  // Mangas without online sources yet are still valid titles, do not treat as junk
+  if (sources.length === 0) return false;
 
   const JUNK_DOMAINS = [
     "shopee.",
@@ -65,6 +71,7 @@ export function isJunkManga(m: Manga): boolean {
 
   for (const s of sources) {
     const urlStr = s.base_url || s.current_chapter_url || (s as any).url || "";
+    if (!urlStr) continue;
     try {
       const u = new URL(urlStr);
       if (JUNK_DOMAINS.some((d) => u.hostname.includes(d))) return true;
@@ -76,13 +83,8 @@ export function isJunkManga(m: Manga): boolean {
         return true;
       }
     } catch {
-      return true;
+      // Invalid URL does not make the whole manga junk if title is valid
     }
-  }
-
-  const cleanT = m.title.trim();
-  if (["เข้าสู่ระบบ", "Google Search", "Shp App Link", "MangaHub", "การ์ตูนเรื่องที่ 43", "/", "Up", "Fin"].includes(cleanT)) {
-    return true;
   }
 
   return false;
@@ -357,7 +359,10 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
       if (remoteItem) {
         const mTime = new Date(m.updated_at || 0).getTime();
         const rTime = new Date(remoteItem.updated_at || 0).getTime();
-        if (mTime > rTime) {
+        const localSourcesCount = (m.sources || []).length;
+        const remoteSourcesCount = (remoteItem.sources || []).length;
+        const hasMoreSourcesLocally = localSourcesCount > remoteSourcesCount;
+        if (mTime > rTime || hasMoreSourcesLocally) {
           try {
             await syncMangaToRemote(client, { ...m, id: remoteItem.id });
           } catch (err) {
