@@ -19,7 +19,7 @@ import {
   BookOpen,
   FileSpreadsheet,
 } from "lucide-react";
-import { exportBackupData, exportMangasToCsv, parseCsvToMangas, restoreBackupData } from "@/lib/storage";
+import { exportBackupData, exportMangasToCsv, parseCsvToMangas, restoreBackupData, normalizeImportedMangas } from "@/lib/storage";
 import { getStoredCategories } from "@/lib/categories";
 
 interface BackupModalProps {
@@ -49,6 +49,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<{ current: number; total: number } | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState<{ count: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,11 +104,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     }
   };
 
-  // Handle File Selection & Parsing (Supports both JSON & Excel CSV)
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processSelectedFile = (file: File) => {
     setSelectedFile(file);
     setImportError(null);
     setRestoreSuccess(null);
@@ -147,7 +144,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         // Standard JSON Parsing
         const parsed = JSON.parse(text);
 
-        let validatedMangas: Manga[] = [];
+        let validatedMangas: any[] = [];
         let validatedCategories: string[] = [];
 
         if (Array.isArray(parsed)) {
@@ -167,7 +164,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           return;
         }
 
-        const validList = validatedMangas.filter((m) => m && m.title);
+        const validList = normalizeImportedMangas(validatedMangas);
         if (validList.length === 0) {
           setImportError("ข้อมูลมังงะในไฟล์ไม่ถูกต้องหรือไม่สมบูรณ์");
           setParsedData(null);
@@ -194,6 +191,36 @@ export const BackupModal: React.FC<BackupModalProps> = ({
       }
     };
     reader.readAsText(file);
+  };
+
+  // Handle File Selection & Parsing (Supports both JSON & Excel CSV)
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    processSelectedFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processSelectedFile(file);
+    }
   };
 
   // Handle Start Restore
@@ -389,7 +416,14 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               {!selectedFile ? (
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-[#1E293B] hover:border-violet-500/70 bg-[#131D31]/50 hover:bg-[#131D31] rounded-2xl p-6 text-center cursor-pointer transition flex flex-col items-center justify-center space-y-2 group"
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition flex flex-col items-center justify-center space-y-2 group ${
+                    isDragging
+                      ? "border-violet-500 bg-violet-950/30"
+                      : "border-[#1E293B] hover:border-violet-500/70 bg-[#131D31]/50 hover:bg-[#131D31]"
+                  }`}
                 >
                   <div className="w-12 h-12 rounded-2xl bg-violet-600/10 group-hover:bg-violet-600/20 text-violet-400 flex items-center justify-center transition">
                     <Upload className="w-6 h-6" />
@@ -415,6 +449,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                         setParsedData(null);
                         setImportError(null);
                         setRestoreSuccess(null);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
                       }}
                       className="text-[11px] text-gray-400 hover:text-red-400 transition"
                     >

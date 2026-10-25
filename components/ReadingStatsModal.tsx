@@ -3,21 +3,19 @@
 import React, { useMemo } from "react";
 import { Manga } from "@/types/manga";
 import { getReadLogs } from "@/lib/storage";
+import { isAdultCategory } from "@/lib/categories";
+import { THEME_KEYWORDS, computeCategoryAndThemeStats } from "./ReadingDashboardBanner";
 import {
   X,
   TrendingUp,
   BookOpen,
   Award,
   Flame,
-  Calendar,
   Sparkles,
   ExternalLink,
   Tag,
   BarChart3,
   Clock,
-  CheckCircle2,
-  BookmarkCheck,
-  Ban,
 } from "lucide-react";
 
 interface ReadingStatsModalProps {
@@ -49,11 +47,13 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
     let weekChaptersFromLogs = 0;
     let todayChaptersFromLogs = 0;
     const openCountMap = new Map<string, number>();
+    const activeMangaIdsFromLogs = new Set<string>();
 
     for (const log of logs) {
       const logDate = new Date(log.timestamp);
       if (logDate >= oneWeekAgo) {
         weekChaptersFromLogs += log.delta || 0;
+        if (log.manga_id) activeMangaIdsFromLogs.add(log.manga_id);
       }
       if (logDate >= startOfToday) {
         todayChaptersFromLogs += log.delta || 0;
@@ -63,37 +63,15 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
       }
     }
 
-    // Fallback/supplement if logs were just started: check mangas read within last 7 days
-    const activeMangasThisWeek = mangas.filter((m) => {
-      if (!m.last_read_at) return false;
-      return new Date(m.last_read_at) >= oneWeekAgo;
-    });
-
     const totalChaptersRead = mangas.reduce((acc, m) => acc + (m.current_chapter || 0), 0);
-
-    // If logs have 0 but user has active mangas this week, estimate minimum active chapters
-    const chaptersThisWeek = Math.max(weekChaptersFromLogs, activeMangasThisWeek.length);
+    const chaptersThisWeek = weekChaptersFromLogs;
     const chaptersToday = todayChaptersFromLogs;
 
-    // 2. Top Category by chapters read
-    const categoryStats = new Map<string, { count: number; chapters: number }>();
-    for (const m of mangas) {
-      const cat = m.category || "การ์ตูนทั่วไป";
-      const cur = categoryStats.get(cat) || { count: 0, chapters: 0 };
-      categoryStats.set(cat, {
-        count: cur.count + 1,
-        chapters: cur.chapters + (m.current_chapter || 0),
-      });
-    }
+    // 2. Unified Top Category & Theme / Genre Analysis
+    const { sortedCategories, topCategory, topTheme } = computeCategoryAndThemeStats(mangas);
 
-    const sortedCategories = Array.from(categoryStats.entries())
-      .map(([name, data]) => ({ name, ...data }))
-      .sort((a, b) => b.chapters - a.chapters);
-
-    const topCategory = sortedCategories[0] || { name: "การ์ตูนทั่วไป", chapters: 0, count: 0 };
-
-    // 3. Top Tags by popularity & chapters
-    const tagStats = new Map<string, { count: number; chapters: number }>();
+    // 3. Top Tags & Themes by popularity & chapters
+    const tagStats = new Map<string, { count: number; chapters: number; icon?: string }>();
     for (const m of mangas) {
       if (m.tags && Array.isArray(m.tags)) {
         for (const tag of m.tags) {
@@ -102,15 +80,31 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
           const cur = tagStats.get(t) || { count: 0, chapters: 0 };
           tagStats.set(t, {
             count: cur.count + 1,
-            chapters: cur.chapters + (m.current_chapter || 0),
+            chapters: cur.chapters + (Number(m.current_chapter) || 0),
           });
         }
       }
     }
 
+    // Supplement with detected themes so Genre/Tag breakdown matches ReadingDashboardBanner
+    for (const [, meta] of Object.entries(THEME_KEYWORDS)) {
+      let count = 0;
+      let chapters = 0;
+      for (const m of mangas) {
+        const allText = `${m.title} ${m.alt_title || ""} ${(m.tags || []).join(" ")} ${m.category || ""}`.toLowerCase();
+        if (meta.regex.test(allText)) {
+          count += 1;
+          chapters += Number(m.current_chapter) || 0;
+        }
+      }
+      if (count > 0 && !tagStats.has(meta.shortLabel)) {
+        tagStats.set(meta.shortLabel, { count, chapters, icon: meta.icon });
+      }
+    }
+
     const sortedTags = Array.from(tagStats.entries())
       .map(([tag, data]) => ({ tag, ...data }))
-      .sort((a, b) => b.count - a.count || b.chapters - a.chapters)
+      .sort((a, b) => b.chapters - a.chapters || b.count - a.count)
       .slice(0, 6);
 
     // 4. Most opened manga & Top 5 most read mangas (by chapters)
@@ -160,8 +154,9 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
       totalChaptersRead,
       chaptersThisWeek,
       chaptersToday,
-      activeMangasThisWeek: activeMangasThisWeek.length,
+      activeMangasThisWeek: activeMangaIdsFromLogs.size,
       topCategory,
+      topTheme,
       sortedCategories,
       sortedTags,
       mostOpenedManga,
@@ -249,15 +244,15 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                 {/* 3. แนวที่อ่านเยอะสุด */}
                 <div className="bg-gradient-to-br from-emerald-950/30 to-[#141C30] border border-emerald-500/30 p-3.5 rounded-2xl flex flex-col justify-between">
                   <div className="flex items-center justify-between text-emerald-400 mb-1">
-                    <span className="text-[11px] font-bold">หมวดโปรดอันดับ 1</span>
+                    <span className="text-[11px] font-bold">แนวโปรดอันดับ 1</span>
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div>
-                    <div className="text-sm font-bold text-white truncate" title={stats.topCategory.name}>
-                      {stats.topCategory.name}
+                    <div className="text-sm font-bold text-white truncate" title={stats.topTheme.label}>
+                      {stats.topTheme.icon} {stats.topTheme.label}
                     </div>
                     <p className="text-[10px] text-emerald-300 mt-0.5 font-semibold">
-                      {stats.topCategory.chapters.toLocaleString()} ตอน ({stats.topCategory.count} เรื่อง)
+                      {stats.topTheme.chapters.toLocaleString()} ตอน ({stats.topTheme.count} เรื่อง)
                     </p>
                   </div>
                 </div>
@@ -290,10 +285,15 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                           src={stats.mostOpenedManga.cover_url}
                           alt={stats.mostOpenedManga.title}
                           referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            const rawUrl = stats.mostOpenedManga?.cover_url || "";
+                            const img = e.currentTarget;
+                            if (rawUrl && !img.src.includes("/api/image-proxy") && !rawUrl.startsWith("data:")) {
+                              img.src = `/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
+                            }
+                          }}
                           className={`w-full h-full object-cover ${
-                            isDiscreetMode &&
-                            (stats.mostOpenedManga.category?.toLowerCase().includes("dojin") ||
-                              stats.mostOpenedManga.category?.toLowerCase().includes("ntr"))
+                            isDiscreetMode && isAdultCategory(stats.mostOpenedManga.category)
                               ? "blur-md"
                               : ""
                           }`}
@@ -352,21 +352,21 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                   </h3>
                   <div className="space-y-2.5">
                     {stats.sortedCategories.slice(0, 4).map((cat) => {
-                      const pct = Math.round(
-                        (cat.chapters / Math.max(1, stats.totalChaptersRead)) * 100
-                      );
+                      const rawPct = (cat.chapters / Math.max(1, stats.totalChaptersRead)) * 100;
+                      const pctLabel =
+                        cat.chapters > 0 && rawPct < 1 ? "<1%" : `${Math.round(rawPct)}%`;
                       return (
                         <div key={cat.name} className="space-y-1">
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-semibold text-gray-200">{cat.name}</span>
                             <span className="text-[11px] text-gray-400">
-                              {cat.chapters.toLocaleString()} ตอน ({pct}%)
+                              {cat.chapters.toLocaleString()} ตอน ({pctLabel})
                             </span>
                           </div>
                           <div className="w-full h-2 bg-[#1A253D] rounded-full overflow-hidden">
                             <div
                               className="h-full bg-gradient-to-r from-violet-600 to-indigo-500 rounded-full"
-                              style={{ width: `${Math.max(4, pct)}%` }}
+                              style={{ width: `${Math.max(4, Math.round(rawPct))}%` }}
                             />
                           </div>
                         </div>
@@ -375,7 +375,7 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                   </div>
                 </div>
 
-                {/* Top Tags */}
+                {/* Top Tags / Themes */}
                 <div className="bg-[#101726] border border-[#1F2E45] rounded-2xl p-4">
                   <h3 className="text-xs font-bold text-gray-300 mb-3 flex items-center gap-1.5">
                     <Tag className="w-3.5 h-3.5 text-violet-400" />
@@ -386,17 +386,18 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                       {stats.sortedTags.map((item, idx) => (
                         <div
                           key={item.tag}
-                          className="bg-[#151F33] border border-[#23334E] rounded-xl p-2.5 flex items-center justify-between"
+                          className="bg-[#151F33] border border-[#23334E] rounded-xl p-2.5 flex items-center justify-between gap-1"
                         >
                           <div className="min-w-0">
                             <span className="text-[10px] text-violet-400 font-bold block">
-                              #{idx + 1}
+                              #{idx + 1} • {item.chapters.toLocaleString()} ตอน
                             </span>
                             <span className="text-xs font-semibold text-gray-200 truncate block">
-                              #{item.tag}
+                              {item.icon ? `${item.icon} ` : "#"}
+                              {item.tag}
                             </span>
                           </div>
-                          <span className="text-[10px] font-bold text-gray-400 bg-black/40 px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] font-bold text-gray-400 bg-black/40 px-1.5 py-0.5 rounded shrink-0">
                             {item.count} เรื่อง
                           </span>
                         </div>
@@ -465,7 +466,8 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-gray-200 truncate">{m.title}</p>
                           <p className="text-[10px] text-gray-400">
-                            {m.category || "การ์ตูนทั่วไป"} • Tier {m.tier || "none"}
+                            {m.category || "การ์ตูนทั่วไป"}
+                            {m.tier && m.tier !== "none" ? ` • Tier ${m.tier}` : ""}
                           </p>
                         </div>
                       </div>

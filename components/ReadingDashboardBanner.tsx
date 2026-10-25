@@ -24,6 +24,104 @@ interface ReadingDashboardBannerProps {
   onCategoryClick?: (category: string) => void;
 }
 
+export const THEME_KEYWORDS: Record<string, { label: string; shortLabel: string; icon: string; regex: RegExp }> = {
+  murim: { label: "มูริม / กำลังภายใน", shortLabel: "มูริม", icon: "⚔️", regex: /มูริม|กำลังภายใน|ยุทธภพ|ดาบ|กระบี่|จอมยุทธ์|murim|martial/i },
+  fantasy: { label: "แฟนตาซี", shortLabel: "แฟนตาซี", icon: "✨", regex: /แฟนตาซี|เวท|เวทมนตร์|จอมเวท|fantasy|magic|mage/i },
+  regressor: { label: "ย้อนเวลา / เกิดใหม่", shortLabel: "ย้อนเวลา", icon: "⏳", regex: /ย้อนเวลา|เกิดใหม่|กลับชาติ|หวนคืน|regress|reincarnat|return/i },
+  dungeon: { label: "ลงดันเจี้ยน / ระบบ", shortLabel: "ลงดันเจี้ยน", icon: "🏰", regex: /ดันเจี้ยน|หอคอย|ระบบ|ฮันเตอร์|dungeon|tower|hunter|system|level/i },
+  op: { label: "พระเอกเทพ", shortLabel: "พระเอกเทพ", icon: "👑", regex: /พระเอกเทพ|เทพ|ไร้เทียมทาน|overpower|strongest/i },
+  romance: { label: "โรแมนติก / ดราม่า", shortLabel: "โรแมนติก", icon: "💖", regex: /โรแมนติก|ดราม่า|ความรัก|romance|drama|love/i },
+  farming: { label: "ทำฟาร์ม / สโลว์ไลฟ์", shortLabel: "ทำฟาร์ม", icon: "🌾", regex: /ทำฟาร์ม|สโลว์ไลฟ์|เกษตร|farm|slow life/i },
+  dojin: { label: "โดจิน / 18+", shortLabel: "โดจิน", icon: "🔞", regex: /dojin|โดจิน|ntr|18\+/i },
+};
+
+export function doesMangaMatchTagOrTheme(manga: Manga, tagOrTheme: string): boolean {
+  if (!tagOrTheme) return true;
+  const clean = tagOrTheme.trim();
+  if (manga.tags && manga.tags.includes(clean)) return true;
+
+  const allText = `${manga.title} ${manga.alt_title || ""} ${(manga.tags || []).join(" ")} ${manga.category || ""}`.toLowerCase();
+  for (const meta of Object.values(THEME_KEYWORDS)) {
+    if (meta.shortLabel === clean || meta.label === clean || meta.label.startsWith(clean)) {
+      return meta.regex.test(allText);
+    }
+  }
+  if ((manga.category || "การ์ตูนทั่วไป") === clean) return true;
+  return allText.includes(clean.toLowerCase());
+}
+
+export function computeCategoryAndThemeStats(mangas: Manga[]) {
+  const categoryStats = new Map<string, { count: number; chapters: number }>();
+  for (const m of mangas) {
+    const cat = m.category || "การ์ตูนทั่วไป";
+    const cur = categoryStats.get(cat) || { count: 0, chapters: 0 };
+    categoryStats.set(cat, {
+      count: cur.count + 1,
+      chapters: cur.chapters + (Number(m.current_chapter) || 0),
+    });
+  }
+
+  const sortedCategories = Array.from(categoryStats.entries())
+    .map(([name, data]) => ({ name, ...data }))
+    .sort((a, b) => b.chapters - a.chapters || b.count - a.count);
+
+  const topCategory = sortedCategories[0] || { name: "การ์ตูนทั่วไป", chapters: 0, count: 0 };
+
+  const themeScores: Record<string, { key: string; label: string; icon: string; chapters: number; count: number }> = {};
+  for (const [key, meta] of Object.entries(THEME_KEYWORDS)) {
+    themeScores[key] = { key, label: meta.label, icon: meta.icon, chapters: 0, count: 0 };
+  }
+
+  for (const m of mangas) {
+    const allText = `${m.title} ${m.alt_title || ""} ${(m.tags || []).join(" ")} ${m.category || ""}`.toLowerCase();
+    const chCount = Number(m.current_chapter) || 0;
+    let matchedAny = false;
+
+    for (const [key, meta] of Object.entries(THEME_KEYWORDS)) {
+      if (meta.regex.test(allText)) {
+        themeScores[key].chapters += chCount;
+        themeScores[key].count += 1;
+        matchedAny = true;
+      }
+    }
+
+    if (!matchedAny && m.category) {
+      if (!themeScores[m.category]) {
+        themeScores[m.category] = {
+          key: m.category,
+          label: m.category,
+          icon: "📚",
+          chapters: 0,
+          count: 0,
+        };
+      }
+      themeScores[m.category].chapters += chCount;
+      themeScores[m.category].count += 1;
+    }
+  }
+
+  const sortedThemes = Object.values(themeScores)
+    .filter((t) => t.count > 0)
+    .sort((a, b) => b.chapters - a.chapters || b.count - a.count);
+
+  const topTheme = sortedThemes[0] || {
+    key: topCategory.name,
+    label: topCategory.name,
+    icon: "📚",
+    chapters: topCategory.chapters,
+    count: topCategory.count,
+  };
+  const secondaryThemes = sortedThemes.slice(1, 3);
+
+  return {
+    sortedCategories,
+    topCategory,
+    sortedThemes,
+    topTheme,
+    secondaryThemes,
+  };
+}
+
 export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
   mangas,
   onOpenStats,
@@ -59,27 +157,25 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // 1. Chapters read this week & today
+    // 1. Chapters read this week & today from actual read logs
     let weekChaptersFromLogs = 0;
     let todayChaptersFromLogs = 0;
+    const activeMangaIdsFromLogs = new Set<string>();
     for (const log of logs) {
       const logDate = new Date(log.timestamp);
       if (logDate >= oneWeekAgo) {
         weekChaptersFromLogs += log.delta || 0;
+        if (log.manga_id) activeMangaIdsFromLogs.add(log.manga_id);
       }
       if (logDate >= startOfToday) {
         todayChaptersFromLogs += log.delta || 0;
       }
     }
 
-    const activeMangasThisWeek = mangas.filter((m) => {
-      if (!m.last_read_at) return false;
-      return new Date(m.last_read_at) >= oneWeekAgo;
-    });
-
-    const chaptersThisWeek = Math.max(weekChaptersFromLogs, activeMangasThisWeek.length);
+    const activeMangasCount = activeMangaIdsFromLogs.size;
+    const chaptersThisWeek = weekChaptersFromLogs;
     const chaptersToday = todayChaptersFromLogs;
-    const totalChaptersRead = mangas.reduce((acc, m) => acc + (m.current_chapter || 0), 0);
+    const totalChaptersRead = mangas.reduce((acc, m) => acc + (Number(m.current_chapter) || 0), 0);
 
     // 2. Manga with most updates / unread backlog
     const mangasWithBacklog = mangas
@@ -96,66 +192,18 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
     // Highest chapter manga in case no backlog
     const topReadManga = [...mangas].sort((a, b) => (b.current_chapter || 0) - (a.current_chapter || 0))[0];
 
-    // 3. Top Theme / Genre Analysis (Checking Tags, Title Keywords & Category)
-    const THEME_KEYWORDS: Record<string, { label: string; icon: string; regex: RegExp }> = {
-      murim: { label: "มูริม / กำลังภายใน", icon: "⚔️", regex: /มูริม|กำลังภายใน|ยุทธภพ|ดาบ|กระบี่|จอมยุทธ์|murim|martial/i },
-      fantasy: { label: "แฟนตาซี", icon: "✨", regex: /แฟนตาซี|เวท|เวทมนตร์|จอมเวท|fantasy|magic|mage/i },
-      regressor: { label: "ย้อนเวลา / เกิดใหม่", icon: "⏳", regex: /ย้อนเวลา|เกิดใหม่|กลับชาติ|หวนคืน|regress|reincarnat|return/i },
-      dungeon: { label: "ลงดันเจี้ยน / ระบบ", icon: "🏰", regex: /ดันเจี้ยน|หอคอย|ระบบ|ฮันเตอร์|dungeon|tower|hunter|system|level/i },
-      op: { label: "พระเอกเทพ", icon: "👑", regex: /พระเอกเทพ|เทพ|ไร้เทียมทาน|overpower|strongest/i },
-      romance: { label: "โรแมนติก / ดราม่า", icon: "💖", regex: /โรแมนติก|ดราม่า|ความรัก|romance|drama|love/i },
-      farming: { label: "ทำฟาร์ม / สโลว์ไลฟ์", icon: "🌾", regex: /ทำฟาร์ม|สโลว์ไลฟ์|เกษตร|farm|slow life/i },
-      dojin: { label: "โดจิน / 18+", icon: "🔞", regex: /dojin|โดจิน|ntr|18\+/i },
-    };
-
-    const themeScores: Record<string, { key: string; label: string; icon: string; chapters: number; count: number }> = {};
-    for (const [key, meta] of Object.entries(THEME_KEYWORDS)) {
-      themeScores[key] = { key, label: meta.label, icon: meta.icon, chapters: 0, count: 0 };
-    }
-
-    for (const m of mangas) {
-      const allText = `${m.title} ${m.alt_title || ""} ${(m.tags || []).join(" ")} ${m.category || ""}`.toLowerCase();
-      let matchedAny = false;
-
-      for (const [key, meta] of Object.entries(THEME_KEYWORDS)) {
-        if (meta.regex.test(allText)) {
-          themeScores[key].chapters += m.current_chapter || 1;
-          themeScores[key].count += 1;
-          matchedAny = true;
-        }
-      }
-
-      // If no keyword match, count into general category
-      if (!matchedAny && m.category) {
-        if (!themeScores[m.category]) {
-          themeScores[m.category] = {
-            key: m.category,
-            label: m.category,
-            icon: "📚",
-            chapters: 0,
-            count: 0,
-          };
-        }
-        themeScores[m.category].chapters += m.current_chapter || 1;
-        themeScores[m.category].count += 1;
-      }
-    }
-
-    const sortedThemes = Object.values(themeScores)
-      .filter((t) => t.count > 0)
-      .sort((a, b) => b.chapters - a.chapters);
-
-    const topTheme = sortedThemes[0] || { label: "แฟนตาซี", icon: "✨", chapters: 0, count: 0 };
-    const secondaryThemes = sortedThemes.slice(1, 3);
+    // 3. Unified Top Category & Theme / Genre Analysis
+    const { topCategory, topTheme, secondaryThemes } = computeCategoryAndThemeStats(mangas);
 
     return {
       chaptersThisWeek,
       chaptersToday,
-      activeMangasThisWeek: activeMangasThisWeek.length,
+      activeMangasThisWeek: activeMangaIdsFromLogs.size,
       totalChaptersRead,
       mostUpdatedManga,
       mostUpdatedBacklog,
       topReadManga,
+      topCategory,
       topTheme,
       secondaryThemes,
       totalMangas: mangas.length,

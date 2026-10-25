@@ -57,38 +57,60 @@ export async function GET() {
   return NextResponse.json({ success: true, data });
 }
 
-// POST /api/mangas - Upsert a single manga or an array of mangas
+// POST /api/mangas - Upsert a single manga or an array of mangas (supports ?mode=replace)
 export async function POST(req: NextRequest) {
+  let body: any;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  try {
+    const mode = req.nextUrl.searchParams.get("mode") || (body && !Array.isArray(body) ? body.mode : null);
+    const itemsPayload = Array.isArray(body) ? body : (body && Array.isArray(body.mangas) ? body.mangas : null);
+
+    if (mode === "replace" && Array.isArray(itemsPayload)) {
+      const valid = itemsPayload.filter((item: Manga) => item && !isJunkManga(item));
+      const updatedList = deduplicateMangas(valid).sort(
+        (a, b) => new Date(b.last_read_at || 0).getTime() - new Date(a.last_read_at || 0).getTime()
+      );
+      writeServerData(updatedList);
+      return NextResponse.json({ success: true, data: updatedList });
+    }
+
     const current = readServerData();
     const map = new Map<string, Manga>();
     current.forEach((m) => map.set(m.id, m));
 
-    if (Array.isArray(body)) {
+    if (Array.isArray(itemsPayload)) {
       // Batch sync
-      body.forEach((item: Manga) => {
+      itemsPayload.forEach((item: Manga) => {
         if (!item || isJunkManga(item)) return;
         const existing = map.get(item.id);
-        if (!existing || new Date(item.updated_at) >= new Date(existing.updated_at)) {
+        if (!existing || new Date(item.updated_at || 0) >= new Date(existing.updated_at || 0)) {
           map.set(item.id, item);
         }
       });
-    } else if (body && body.id) {
+    } else if (body && typeof body === "object" && body.id) {
       // Single upsert
       const item = body as Manga;
       if (!isJunkManga(item)) {
-        map.set(item.id, {
-          ...item,
-          updated_at: new Date().toISOString(),
-        });
+        const existing = map.get(item.id);
+        const itemUpdatedAt = item.updated_at || new Date().toISOString();
+        if (!existing || new Date(itemUpdatedAt) >= new Date(existing.updated_at || 0)) {
+          map.set(item.id, {
+            ...item,
+            updated_at: itemUpdatedAt,
+          });
+        }
       }
     } else {
       return NextResponse.json({ success: false, error: "Invalid payload" }, { status: 400 });
     }
 
     const updatedList = deduplicateMangas(Array.from(map.values())).sort(
-      (a, b) => new Date(b.last_read_at).getTime() - new Date(a.last_read_at).getTime()
+      (a, b) => new Date(b.last_read_at || 0).getTime() - new Date(a.last_read_at || 0).getTime()
     );
 
     writeServerData(updatedList);

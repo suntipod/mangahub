@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
+import { isSafeExternalUrl, safeDecodeURIComponent } from "@/lib/ssrf";
 
 // Dedicated chapter container selectors across all major manga platforms/themes (WordPress Madara, MangaStream, MangaThemesia, etc.)
 const CHAPTER_CONTAINER_SELECTORS = [
@@ -54,7 +55,7 @@ const EXCLUDED_CONTAINERS = [
 function extractChapterFromUrl(urlString: string): number | undefined {
   try {
     const parsed = new URL(urlString);
-    const path = decodeURIComponent(parsed.pathname);
+    const path = safeDecodeURIComponent(parsed.pathname);
 
     // If path is like /cartoon/book/714/read/25347, 25347 is an internal chapter ID, NOT chapter number
     if (/(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(path)) {
@@ -83,7 +84,7 @@ function extractChapterFromUrl(urlString: string): number | undefined {
 function extractSeriesSlug(urlStr: string): string {
   try {
     const u = new URL(urlStr);
-    let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
+    let pathname = safeDecodeURIComponent(u.pathname).replace(/\/+$/, "");
 
     // Strip leading chapter prefix or number e.g. /14-return-of-the-legend -> /return-of-the-legend
     pathname = pathname.replace(/^\/?\d+[-_]/, "/");
@@ -138,12 +139,18 @@ async function checkReadRealm(urlStr: string): Promise<number | null> {
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "application/json",
           },
+          signal: AbortSignal.timeout(8000),
           next: { revalidate: 0 },
         }
       );
       if (homeRes.ok) {
         const json = await homeRes.json();
-        if (json && typeof json.book_chapter_count === "number" && json.book_chapter_count > 0) {
+        if (
+          json &&
+          typeof json.book_chapter_count === "number" &&
+          json.book_chapter_count > 0 &&
+          json.book_chapter_count < 3000
+        ) {
           return json.book_chapter_count;
         }
       }
@@ -157,6 +164,7 @@ async function checkReadRealm(urlStr: string): Promise<number | null> {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json",
       },
+      signal: AbortSignal.timeout(8000),
       next: { revalidate: 0 },
     });
     if (!res.ok) return null;
@@ -169,7 +177,7 @@ async function checkReadRealm(urlStr: string): Promise<number | null> {
         );
         if (titleMatch) {
           const num = parseFloat(titleMatch[1]);
-          if (!isNaN(num) && num > 0) chapters.push(num);
+          if (!isNaN(num) && num > 0 && num < 3000) chapters.push(num);
         }
       }
       if (chapters.length > 0) {
@@ -220,7 +228,7 @@ function findSeriesUrlFromHtml(html: string, currentUrl: string): string | null 
 function getSeriesCandidates(urlStr: string): string[] {
   try {
     const u = new URL(urlStr);
-    let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
+    let pathname = safeDecodeURIComponent(u.pathname).replace(/\/+$/, "");
 
     pathname = pathname.replace(/^\/?\d+[-_]/, "/");
 
@@ -306,6 +314,8 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
     if (isNaN(num) || num <= 0) return false;
     if (num >= 1990 && num <= 2030 && (currentChapter < 1500 || currentChapter > 2100)) return false;
     if ((num === 404 || num === 500) && currentChapter < 150) return false;
+    if (num > 3000 && currentChapter <= 1000) return false;
+    if (currentChapter > 0 && currentChapter < 500 && num > currentChapter + 1500) return false;
     if (num > 5000 && currentChapter < 4000) return false;
     return true;
   };
@@ -321,7 +331,7 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
 
           // If href points to a completely different series slug, ignore it!
           if (href && seriesSlug && seriesSlug.length > 3) {
-            const decodedHref = decodeURIComponent(href).toLowerCase();
+            const decodedHref = safeDecodeURIComponent(href).toLowerCase();
             if (
               decodedHref.includes("http") &&
               !decodedHref.includes(seriesSlug) &&
@@ -414,7 +424,7 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
 
     // If we have a series slug, the link's href MUST contain the slug!
     if (seriesSlug && seriesSlug.length > 3) {
-      const decodedHref = decodeURIComponent(href).toLowerCase();
+      const decodedHref = safeDecodeURIComponent(href).toLowerCase();
       if (!decodedHref.includes(seriesSlug)) {
         return; // Skip unrelated links!
       }
@@ -462,12 +472,12 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
   return filterChapterOutliers(Array.from(foundChapters));
 }
 
-// Fetch helper with standard browser headers and timeout
-async function fetchPageHtml(url: string): Promise<string | null> {
+// Fetch helper with standard browser headers and timeout covering body read
+async function fetchPageHtml(url: string, timeoutMs: number = 8000): Promise<string | null> {
+  if (!isSafeExternalUrl(url)) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-
     const res = await fetch(url, {
       headers: {
         "User-Agent":
@@ -487,7 +497,9 @@ async function fetchPageHtml(url: string): Promise<string | null> {
       signal: controller.signal,
       next: { revalidate: 0 },
     });
-    clearTimeout(timeout);
+    if (res.url && !isSafeExternalUrl(res.url)) {
+      return null;
+    }
     if (!res.ok) {
       console.warn(`Fetch ${url} failed with status: ${res.status}`);
       return null;
@@ -496,13 +508,24 @@ async function fetchPageHtml(url: string): Promise<string | null> {
   } catch (e: any) {
     console.warn(`Fetch error for ${url}:`, e?.message || e);
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { url, currentChapter = 1 } = body;
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON body" },
+        { status: 400 }
+      );
+    }
+
+    const { url, currentChapter = 1 } = body || {};
 
     if (!url || typeof url !== "string") {
       return NextResponse.json(
@@ -511,15 +534,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(url.trim());
-    } catch {
+    if (!isSafeExternalUrl(url.trim())) {
       return NextResponse.json(
-        { success: false, error: "รูปแบบ URL ไม่ถูกต้อง" },
+        { success: false, error: "รูปแบบ URL ไม่ถูกต้องหรือไม่อนุญาต" },
         { status: 400 }
       );
     }
+
+    const parsedUrl = new URL(url.trim());
 
     // 1. Check specialized platforms (e.g. ReadRealm API)
     if (parsedUrl.hostname.includes("readrealm.co")) {
@@ -540,21 +562,25 @@ export async function POST(req: NextRequest) {
 
     // Check if input URL looks like a chapter reader page
     const hasChapterInPath = Boolean(extractChapterFromUrl(parsedUrl.href));
-    const candidateSeriesUrls = getSeriesCandidates(parsedUrl.href);
+    const candidateSeriesUrls = getSeriesCandidates(parsedUrl.href)
+      .filter((candUrl) => candUrl !== parsedUrl.href)
+      .slice(0, 3);
 
     // 2. If the user provided a chapter URL (e.g. /regressor-...-126/),
-    // try candidate series root URLs first, because the series directory
-    // contains the full authoritative chapter list (#chapterlist)!
+    // try candidate series root URLs in parallel within a tight timeout budget (5s),
+    // because the series directory contains the full authoritative chapter list (#chapterlist)!
     if (hasChapterInPath && candidateSeriesUrls.length > 0) {
-      for (const candUrl of candidateSeriesUrls) {
-        if (candUrl === parsedUrl.href) continue;
-        const candHtml = await fetchPageHtml(candUrl);
-        if (candHtml) {
-          const chapters = extractChaptersFromHtml(candHtml, seriesSlug, Number(currentChapter));
-          if (chapters.length > 0) {
-            checkedChapters.push(...chapters);
-            break; // Master series table of contents found!
-          }
+      const candidateResults = await Promise.all(
+        candidateSeriesUrls.map(async (candUrl) => {
+          const candHtml = await fetchPageHtml(candUrl, 5000);
+          if (!candHtml) return [];
+          return extractChaptersFromHtml(candHtml, seriesSlug, Number(currentChapter));
+        })
+      );
+      for (const chapters of candidateResults) {
+        if (chapters.length > 0) {
+          checkedChapters.push(...chapters);
+          break; // Master series table of contents found!
         }
       }
     }
@@ -562,23 +588,23 @@ export async function POST(req: NextRequest) {
     // 3. Fetch primary URL if we haven't found chapters yet, or if input URL is already a series page
     let primaryHtml: string | null = null;
     if (checkedChapters.length === 0) {
-      primaryHtml = await fetchPageHtml(parsedUrl.href);
+      primaryHtml = await fetchPageHtml(parsedUrl.href, 8000);
       if (primaryHtml) {
         const chapters = extractChaptersFromHtml(primaryHtml, seriesSlug, Number(currentChapter));
         checkedChapters.push(...chapters);
       }
     }
 
-    // 4. If primary URL was fetched and we still don't have chapters (or to cross-reference),
+    // 4. If primary URL was fetched and we still don't have a multi-chapter TOC,
     // check if the reader page breadcrumbs explicitly link to the series page!
-    if (primaryHtml) {
+    if (primaryHtml && checkedChapters.length <= 1) {
       const breadcrumbSeriesUrl = findSeriesUrlFromHtml(primaryHtml, parsedUrl.href);
       if (
         breadcrumbSeriesUrl &&
         breadcrumbSeriesUrl !== parsedUrl.href &&
         !candidateSeriesUrls.includes(breadcrumbSeriesUrl)
       ) {
-        const seriesHtml = await fetchPageHtml(breadcrumbSeriesUrl);
+        const seriesHtml = await fetchPageHtml(breadcrumbSeriesUrl, 5000);
         if (seriesHtml) {
           const seriesChapters = extractChaptersFromHtml(seriesHtml, seriesSlug, Number(currentChapter));
           checkedChapters.push(...seriesChapters);

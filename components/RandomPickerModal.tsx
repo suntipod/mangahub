@@ -2,15 +2,13 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Manga } from "@/types/manga";
+import { isAdultCategory } from "@/lib/categories";
 import {
   X,
   Dices,
-  Sparkles,
   Zap,
   BookOpen,
-  RefreshCw,
   Flame,
-  ExternalLink,
   Info,
 } from "lucide-react";
 
@@ -19,6 +17,7 @@ interface RandomPickerModalProps {
   onClose: () => void;
   mangas: Manga[];
   onOpenReader: (manga: Manga) => void;
+  onIncrementAndOpenNext?: (manga: Manga) => void;
   onSelectManga?: (manga: Manga) => void;
   isDiscreetMode?: boolean;
 }
@@ -30,6 +29,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
   onClose,
   mangas,
   onOpenReader,
+  onIncrementAndOpenNext,
   onSelectManga,
   isDiscreetMode = false,
 }) => {
@@ -41,48 +41,47 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
 
   const rollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Filter pool candidates based on chosen filter
+  // Filter pool candidates based on chosen filter (without silent fallback to all mangas)
   const candidatePool = useMemo(() => {
     if (mangas.length === 0) return [];
 
     if (filterMode === "tier_sa_onhold") {
-      // 1st priority: Tier S or A that are on_hold
       const onHoldTierSA = mangas.filter(
         (m) => (m.tier === "S" || m.tier === "A") && m.status === "on_hold"
       );
       if (onHoldTierSA.length > 0) return onHoldTierSA;
 
-      // 2nd priority: Tier S or A that are reading or plan_to_read
+      // Secondary: Tier S or A that are not dropped/completed
       const anyTierSA = mangas.filter(
-        (m) => (m.tier === "S" || m.tier === "A") && m.status !== "dropped"
+        (m) => (m.tier === "S" || m.tier === "A") && m.status !== "dropped" && m.status !== "completed"
       );
-      if (anyTierSA.length > 0) return anyTierSA;
-
-      // Fallback: any on_hold
-      const anyOnHold = mangas.filter((m) => m.status === "on_hold");
-      if (anyOnHold.length > 0) return anyOnHold;
-
-      return mangas;
+      return anyTierSA;
     }
 
     if (filterMode === "has_update") {
-      const withUpdate = mangas.filter(
-        (m) => m.latest_available_chapter && m.latest_available_chapter > m.current_chapter
+      return mangas.filter(
+        (m) =>
+          m.status !== "dropped" &&
+          m.latest_available_chapter &&
+          m.latest_available_chapter > m.current_chapter
       );
-      return withUpdate.length > 0 ? withUpdate : mangas;
     }
 
     if (filterMode === "all_onhold") {
-      const onHold = mangas.filter((m) => m.status === "on_hold");
-      return onHold.length > 0 ? onHold : mangas;
+      return mangas.filter((m) => m.status === "on_hold");
     }
 
-    return mangas;
+    return mangas.filter((m) => m.status !== "dropped");
   }, [mangas, filterMode]);
 
   // Execute roll logic
   const handleRoll = () => {
-    if (candidatePool.length === 0) return;
+    if (candidatePool.length === 0) {
+      setPickedManga(null);
+      setShuffleTitle("");
+      setShuffleCover("");
+      return;
+    }
     if (isRolling) return;
 
     setIsRolling(true);
@@ -116,20 +115,31 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
     }, intervalTime);
   };
 
-  // Trigger initial roll when modal opens
+  // Trigger initial roll when modal opens or filter changes
   useEffect(() => {
-    if (isOpen && mangas.length > 0) {
+    if (isOpen && candidatePool.length > 0) {
       handleRoll();
     } else {
       if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
       setIsRolling(false);
+      if (candidatePool.length === 0) {
+        setPickedManga(null);
+        setShuffleTitle("");
+        setShuffleCover("");
+      }
     }
     return () => {
       if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
     };
-  }, [isOpen, filterMode]);
+  }, [isOpen, filterMode, candidatePool.length]);
 
   if (!isOpen) return null;
+
+  const hasUnreadForPicked = Boolean(
+    pickedManga &&
+      pickedManga.latest_available_chapter &&
+      pickedManga.latest_available_chapter > pickedManga.current_chapter
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
@@ -160,21 +170,21 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
         </div>
 
         {/* Filter Pills Toolbar */}
-        <div className="px-5 pt-3.5 pb-2 bg-[#090E1A] border-b border-[#1F2E45]/60 flex items-center gap-1.5 overflow-x-auto scrollbar-none text-xs">
+        <div className="px-4 sm:px-5 py-2.5 bg-[#090E1A] border-b border-[#1F2E45]/60 flex items-center gap-1.5 flex-wrap text-xs">
           <span className="text-[11px] font-bold text-gray-400 shrink-0 mr-1">สุ่มจาก:</span>
           <button
             onClick={() => setFilterMode("tier_sa_onhold")}
-            className={`px-3 py-1 rounded-xl font-bold transition shrink-0 ${
+            className={`px-2.5 py-1 rounded-xl font-bold transition shrink-0 ${
               filterMode === "tier_sa_onhold"
                 ? "bg-amber-500 text-black shadow-md shadow-amber-500/30"
                 : "bg-[#141C30] text-gray-300 hover:text-white border border-[#1F2E45]"
             }`}
           >
-            ⭐ Tier S/A ที่ดองไว้
+            ⭐ Tier S/A
           </button>
           <button
             onClick={() => setFilterMode("has_update")}
-            className={`px-3 py-1 rounded-xl font-bold transition shrink-0 flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-xl font-bold transition shrink-0 flex items-center gap-1 ${
               filterMode === "has_update"
                 ? "bg-orange-600 text-white shadow-md shadow-orange-600/30"
                 : "bg-[#141C30] text-gray-300 hover:text-white border border-[#1F2E45]"
@@ -185,23 +195,23 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
           </button>
           <button
             onClick={() => setFilterMode("all_onhold")}
-            className={`px-3 py-1 rounded-xl font-bold transition shrink-0 ${
+            className={`px-2.5 py-1 rounded-xl font-bold transition shrink-0 ${
               filterMode === "all_onhold"
                 ? "bg-violet-600 text-white shadow-md shadow-violet-600/30"
                 : "bg-[#141C30] text-gray-300 hover:text-white border border-[#1F2E45]"
             }`}
           >
-            ⏳ การ์ตูนดองทั้งหมด
+            ⏳ ดองไว้
           </button>
           <button
             onClick={() => setFilterMode("all")}
-            className={`px-3 py-1 rounded-xl font-bold transition shrink-0 ${
+            className={`px-2.5 py-1 rounded-xl font-bold transition shrink-0 ${
               filterMode === "all"
                 ? "bg-gray-200 text-gray-900 shadow-md font-black"
                 : "bg-[#141C30] text-gray-300 hover:text-white border border-[#1F2E45]"
             }`}
           >
-            📚 ทั้งหมดในคลัง ({mangas.length})
+            📚 ทั้งหมด ({mangas.filter((m) => m.status !== "dropped").length || mangas.length})
           </button>
         </div>
 
@@ -232,10 +242,15 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
                     src={shuffleCover || pickedManga?.cover_url}
                     alt={shuffleTitle || pickedManga?.title || "Manga"}
                     referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const rawUrl = shuffleCover || pickedManga?.cover_url || "";
+                      const img = e.currentTarget;
+                      if (rawUrl && !img.src.includes("/api/image-proxy") && !rawUrl.startsWith("data:")) {
+                        img.src = `/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
+                      }
+                    }}
                     className={`w-full h-full object-cover ${
-                      isDiscreetMode &&
-                      (pickedManga?.category?.toLowerCase().includes("dojin") ||
-                        pickedManga?.category?.toLowerCase().includes("ntr"))
+                      isDiscreetMode && isAdultCategory(pickedManga?.category)
                         ? "blur-md"
                         : ""
                     }`}
@@ -270,6 +285,8 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
                         ? "📖 กำลังอ่าน"
                         : pickedManga.status === "completed"
                         ? "✅ อ่านจบ"
+                        : pickedManga.status === "dropped"
+                        ? "🛑 เทแล้ว"
                         : "📌 อยากอ่าน"}
                     </span>
                   </div>
@@ -333,7 +350,11 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
                   onClick={() => {
                     if (pickedManga) {
                       onClose();
-                      onOpenReader(pickedManga);
+                      if (hasUnreadForPicked && onIncrementAndOpenNext) {
+                        onIncrementAndOpenNext(pickedManga);
+                      } else {
+                        onOpenReader(pickedManga);
+                      }
                     }
                   }}
                   className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white font-extrabold text-sm shadow-xl shadow-violet-600/30 flex items-center justify-center gap-2 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -342,8 +363,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
                   <span>
                     เปิดอ่านเรื่องนี้ทันที (ช.
                     {pickedManga
-                      ? pickedManga.latest_available_chapter &&
-                        pickedManga.latest_available_chapter > pickedManga.current_chapter
+                      ? hasUnreadForPicked && onIncrementAndOpenNext
                         ? pickedManga.current_chapter + 1
                         : pickedManga.current_chapter
                       : 1}

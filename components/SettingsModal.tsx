@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { SupabaseConfig } from "@/types/manga";
 import {
   X,
@@ -18,7 +18,6 @@ import {
   Trash2,
   Lock,
   Sparkles,
-  Image as ImageIcon,
 } from "lucide-react";
 import { testSupabaseConnection } from "@/lib/supabase";
 import {
@@ -26,12 +25,16 @@ import {
   saveLocalMangas,
   autoFixMissingAndBadCovers,
   isCoverNeedingEnrichment,
+  exportBackupData,
+  normalizeImportedMangas,
+  restoreBackupData,
 } from "@/lib/storage";
 import {
   getStoredCategories,
   addCategory,
   deleteCategory,
   DEFAULT_CATEGORIES,
+  isAdultCategory,
 } from "@/lib/categories";
 
 interface SettingsModalProps {
@@ -55,14 +58,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenBackup,
   onOpenInstallPwa,
 }) => {
-  if (!isOpen) return null;
-
   const [url, setUrl] = useState(config.url || "");
   const [anonKey, setAnonKey] = useState(config.anonKey || "");
   const [enabled, setEnabled] = useState(config.enabled || false);
 
   // Categories state
-  const [categories, setCategories] = useState<string[]>(getStoredCategories());
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [newCategoryName, setNewCategoryName] = useState("");
 
   const [testing, setTesting] = useState(false);
@@ -82,6 +83,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     text: string;
     success: boolean;
   } | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setUrl(config.url || "");
+      setAnonKey(config.anonKey || "");
+      setEnabled(Boolean(config.enabled));
+      setCategories(getStoredCategories());
+    }
+  }, [isOpen, config.url, config.anonKey, config.enabled]);
+
+  if (!isOpen) return null;
 
   const localMangas = getLocalMangas();
   const needingFixCount = localMangas.filter((m) =>
@@ -179,30 +191,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Export JSON backup
   const handleExportBackup = () => {
-    const mangas = getLocalMangas();
-    const blob = new Blob([JSON.stringify(mangas, null, 2)], {
+    const backup = exportBackupData();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {
       type: "application/json",
     });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `mangahub-backup-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
+    URL.revokeObjectURL(a.href);
   };
 
-  // Import JSON backup
+  // Import JSON backup (supports both { mangas: [...] } and [...] formats)
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const content = event.target?.result as string;
         const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) {
-          saveLocalMangas(parsed);
+        const rawList = Array.isArray(parsed)
+          ? parsed
+          : parsed && typeof parsed === "object" && Array.isArray(parsed.mangas)
+          ? parsed.mangas
+          : null;
+
+        if (rawList) {
+          const normalized = normalizeImportedMangas(rawList);
+          if (normalized.length === 0) {
+            alert("ไม่พบข้อมูลมังงะที่ถูกต้องในไฟล์");
+            return;
+          }
+          await restoreBackupData(parsed, {
+            mode: "merge",
+            syncSupabase: enabled,
+          });
+          setCategories(getStoredCategories());
+          onCategoriesChanged?.();
           onDataImported();
-          alert(`นำเข้าข้อมูลมังงะสำเร็จจำนวน ${parsed.length} เรื่อง!`);
+          alert(`นำเข้าข้อมูลมังงะสำเร็จจำนวน ${normalized.length} เรื่อง!`);
         } else {
           alert("รูปแบบไฟล์ไม่ถูกต้อง");
         }
@@ -257,8 +287,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="flex flex-wrap gap-2 pt-1">
               {categories.map((cat) => {
                 const isDefault = DEFAULT_CATEGORIES.includes(cat);
-                const isDojin = cat.toLowerCase().includes("dojin") || cat.includes("โดจิน");
                 const isNTR = cat.toUpperCase().includes("NTR");
+                const isDojin = !isNTR && isAdultCategory(cat);
 
                 return (
                   <div

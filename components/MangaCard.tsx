@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Manga, ReadingStatus } from "@/types/manga";
+import { isAdultCategory } from "@/lib/categories";
 import { ExternalLink, Plus, Globe, Check, Flame, Zap, EyeOff, BookOpen } from "lucide-react";
 
 interface MangaCardProps {
@@ -57,22 +58,19 @@ export const MangaCard: React.FC<MangaCardProps> = ({
     }
   };
 
-  const is18Plus = Boolean(
-    manga.category &&
-      (manga.category.toLowerCase().includes("dojin") ||
-        manga.category.toLowerCase().includes("โดจิน") ||
-        manga.category.toLowerCase().includes("ntr"))
-  );
+  const is18Plus = isAdultCategory(manga.category);
   const shouldBlur = Boolean(isDiscreetMode && is18Plus);
 
+  const sources = Array.isArray(manga.sources) ? manga.sources : [];
   const primarySource =
-    manga.sources.find((s) => s.is_primary) || manga.sources[0];
-  const otherSourcesCount = Math.max(0, manga.sources.length - 1);
+    sources.find((s) => s.is_primary) || sources[0];
+  const otherSourcesCount = Math.max(0, sources.length - 1);
   const unreadCount = Math.max(
     0,
     (manga.latest_available_chapter || manga.current_chapter) - manga.current_chapter
   );
   const hasNewChapter = unreadCount > 0;
+  const showFastForward = Boolean(hasNewChapter && onSyncToLatest && unreadCount > 1);
 
   const handleIncrement = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -192,17 +190,17 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             {manga.category && (
               <span
                 className={`backdrop-blur-md text-[10px] font-extrabold px-1.5 py-0.5 rounded-md shadow ${
-                  manga.category.toLowerCase().includes("dojin")
-                    ? "bg-rose-600/90 text-white"
-                    : manga.category.toLowerCase().includes("ntr")
+                  manga.category.toLowerCase().includes("ntr")
                     ? "bg-purple-600/90 text-white"
+                    : isAdultCategory(manga.category)
+                    ? "bg-rose-600/90 text-white"
                     : "bg-black/60 text-gray-200 border border-white/10"
                 }`}
               >
-                {manga.category.toLowerCase().includes("dojin")
-                  ? "🔞"
-                  : manga.category.toLowerCase().includes("ntr")
+                {manga.category.toLowerCase().includes("ntr")
                   ? "💔"
+                  : isAdultCategory(manga.category)
+                  ? "🔞"
                   : "📚"}
               </span>
             )}
@@ -239,7 +237,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onStatusChange) {
-                    const statusCycle: ReadingStatus[] = ["reading", "on_hold", "completed", "dropped"];
+                    const statusCycle: ReadingStatus[] = ["reading", "on_hold", "completed", "dropped", "plan_to_read"];
                     const curIdx = statusCycle.indexOf(manga.status);
                     const nextStatus = statusCycle[(curIdx + 1) % statusCycle.length];
                     onStatusChange(manga.id, nextStatus);
@@ -254,7 +252,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                     ? "bg-rose-700 text-white shadow-rose-700/30"
                     : "bg-purple-700 text-white shadow-purple-700/30"
                 }`}
-                title="คลิกเพื่อสลับสถานะการอ่าน (กำลังอ่าน ➔ ดองไว้ ➔ อ่านจบ ➔ เท)"
+                title="คลิกเพื่อสลับสถานะการอ่าน (กำลังอ่าน ➔ ดองไว้ ➔ อ่านจบ ➔ เท ➔ อยากอ่าน)"
               >
                 {manga.status === "completed"
                   ? "✅ จบ"
@@ -270,16 +268,16 @@ export const MangaCard: React.FC<MangaCardProps> = ({
 
 
         {/* Bottom Dark Gradient & Title (ตรงกับรูปตัวอย่าง) */}
-        <div className="relative z-10 pt-16 pb-3 px-3 bg-gradient-to-t from-black via-black/85 to-transparent flex flex-col justify-end">
+        <div className="relative z-10 pt-16 pb-2.5 px-2.5 sm:px-3 bg-gradient-to-t from-black via-black/85 to-transparent flex flex-col justify-end">
           {/* Source & Backup indicator */}
           {primarySource && (
             <div className="flex items-center gap-1 mb-1 pointer-events-none">
-              <span className="bg-black/70 backdrop-blur-md text-gray-300 text-[9px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                {primarySource.site_name}
+              <span className="bg-black/70 backdrop-blur-md text-gray-300 text-[9px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1 truncate max-w-[110px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                <span className="truncate">{primarySource.site_name}</span>
               </span>
               {otherSourcesCount > 0 && (
-                <span className="bg-violet-950/80 border border-violet-500/30 text-violet-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                <span className="bg-violet-950/80 border border-violet-500/30 text-violet-300 text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0">
                   +{otherSourcesCount} เว็บสำรอง
                 </span>
               )}
@@ -331,42 +329,46 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           )}
 
           {/* Quick Action Overlay (อ่านตอนปัจจุบัน, +1 & เปิดตอนถัดไป, +1 เท่านั้น) */}
-          <div className="mt-2 pt-2 border-t border-white/10 flex items-center gap-1">
+          <div className="mt-2 pt-2 border-t border-white/10 flex items-center gap-1 min-w-0">
             {/* Open Current Chapter */}
             <button
               onClick={handleOpenReader}
-              className="flex-1 min-w-0 flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-bold bg-[#141E33]/90 hover:bg-violet-600 text-gray-200 hover:text-white border border-white/10 backdrop-blur-sm transition active:scale-95 shadow truncate"
+              className={`flex-1 min-w-0 flex items-center justify-center gap-0.5 py-1.5 ${
+                showFastForward ? "px-1 text-[10px]" : "px-1.5 text-[11px]"
+              } rounded-xl font-bold bg-[#141E33]/90 hover:bg-violet-600 text-gray-200 hover:text-white border border-white/10 backdrop-blur-sm transition active:scale-95 shadow truncate`}
               title={`เปิดอ่านตอนปัจจุบัน (ตอนที่ ${manga.current_chapter})`}
             >
-              <BookOpen className="w-3 h-3 shrink-0" />
+              <BookOpen className={`${showFastForward ? "hidden sm:inline w-2.5 h-2.5" : "w-3 h-3"} shrink-0`} />
               <span className="truncate">ช.{manga.current_chapter}</span>
             </button>
 
             {/* Smart +1 & Open Next Chapter */}
             <button
               onClick={handleOpenNext}
-              className={`flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-xl text-[11px] font-black transition active:scale-95 shadow shrink-0 ${
+              className={`flex items-center justify-center gap-0.5 py-1.5 ${
+                showFastForward ? "px-1.5 text-[10px]" : "px-2 text-[11px]"
+              } rounded-xl font-black transition active:scale-95 shadow shrink-0 ${
                 hasNewChapter
                   ? "bg-gradient-to-r from-orange-500 via-rose-500 to-pink-600 hover:from-orange-600 text-white shadow-orange-500/40 animate-pulse border border-orange-300/30"
                   : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30"
               }`}
               title={`เปิดอ่านตอนถัดไป (+1 เป็นตอนที่ ${manga.current_chapter + 1} และเปิดหน้าเว็บทันที)`}
             >
-              <ExternalLink className="w-3 h-3 shrink-0" />
+              <ExternalLink className={`${showFastForward ? "w-2.5 h-2.5" : "w-3 h-3"} shrink-0`} />
               <span>ช.{manga.current_chapter + 1}</span>
             </button>
 
             {/* Quick Sync to Latest Chapter Button */}
-            {hasNewChapter && onSyncToLatest && unreadCount > 1 && (
+            {showFastForward && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSyncToLatest(manga.id, manga.latest_available_chapter!);
+                  onSyncToLatest!(manga.id, manga.latest_available_chapter!);
                 }}
                 className="flex items-center justify-center gap-0.5 py-1.5 px-1.5 rounded-xl text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 text-white shadow shadow-orange-500/30 transition active:scale-90 shrink-0"
                 title={`อ่านถึงตอนล่าสุดแล้ว: ข้ามไปตอนที่ ${manga.latest_available_chapter} ทันที`}
               >
-                <Zap className="w-3 h-3 fill-current text-yellow-200" />
+                <Zap className="w-2.5 h-2.5 fill-current text-yellow-200 shrink-0" />
                 <span>ช.{manga.latest_available_chapter}</span>
               </button>
             )}
@@ -374,7 +376,9 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             {/* +1 Only Button */}
             <button
               onClick={handleIncrement}
-              className={`flex items-center justify-center p-1.5 rounded-xl text-xs font-bold transition active:scale-90 shrink-0 ${
+              className={`flex items-center justify-center ${
+                showFastForward ? "p-1" : "p-1.5"
+              } rounded-xl text-xs font-bold transition active:scale-90 shrink-0 ${
                 justIncremented
                   ? "bg-emerald-600 text-white shadow"
                   : "bg-white/10 hover:bg-violet-600 text-white border border-white/20 backdrop-blur-sm"
@@ -446,7 +450,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           <div className="flex flex-col gap-1 items-start shrink-0">
             {hasNewChapter ? (
               <div className="flex flex-col gap-0.5 items-start">
-                <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[11px] font-black px-2.5 py-0.5 rounded-lg shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse border border-orange-300/30">
+                <span className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white text-[11px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-orange-500/40 flex items-center gap-1 animate-pulse border border-orange-300/30">
                   <Flame className="w-3.5 h-3.5 fill-current" />
                   <span>+{unreadCount} ตอนใหม่</span>
                 </span>
@@ -455,8 +459,8 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                 </span>
               </div>
             ) : (
-              <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-md shrink-0 flex items-center gap-1">
-                <span>ตอนที่ {manga.current_chapter}</span>
+              <span className="bg-violet-600/90 backdrop-blur-md text-white text-[11px] font-bold px-2 py-1 rounded-lg shadow-md shrink-0 flex items-center gap-1">
+                <span>ช.{manga.current_chapter}</span>
                 {manga.latest_available_chapter ? (
                   <span className="text-[10px] text-violet-200 opacity-90">/ {manga.latest_available_chapter}</span>
                 ) : null}
@@ -464,7 +468,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          <div className="flex items-center gap-1 flex-wrap justify-end min-w-0">
             {isRecentlyRead && (
               <span className="bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-md shadow-violet-600/40 flex items-center gap-0.5 animate-pulse">
                 <BookOpen className="w-2.5 h-2.5" />
@@ -473,18 +477,18 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             )}
             {manga.category && (
               <span
-                className={`backdrop-blur-md text-[10px] font-extrabold px-2 py-0.5 rounded-md shadow ${
-                  manga.category.toLowerCase().includes("dojin")
-                    ? "bg-rose-600/90 text-white"
-                    : manga.category.toLowerCase().includes("ntr")
+                className={`backdrop-blur-md text-[10px] font-extrabold px-1.5 py-0.5 rounded-md shadow max-w-[95px] sm:max-w-[130px] truncate ${
+                  manga.category.toLowerCase().includes("ntr")
                     ? "bg-purple-600/90 text-white"
+                    : isAdultCategory(manga.category)
+                    ? "bg-rose-600/90 text-white"
                     : "bg-slate-800/90 text-gray-200 border border-slate-700/50"
                 }`}
               >
-                {manga.category.toLowerCase().includes("dojin")
-                  ? "🔞 Dojin"
-                  : manga.category.toLowerCase().includes("ntr")
+                {manga.category.toLowerCase().includes("ntr")
                   ? "💔 NTR"
+                  : isAdultCategory(manga.category)
+                  ? `🔞 ${manga.category}`
                   : manga.category}
               </span>
             )}
@@ -519,12 +523,12 @@ export const MangaCard: React.FC<MangaCardProps> = ({
         {/* Multi-source indicator pill */}
         {primarySource && (
           <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center gap-1.5 pointer-events-none">
-            <span className="bg-black/75 backdrop-blur-md text-gray-300 text-[10px] px-2 py-0.5 rounded-md flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              {primarySource.site_name}
+            <span className="bg-black/75 backdrop-blur-md text-gray-300 text-[10px] px-2 py-0.5 rounded-md flex items-center gap-1 truncate max-w-[120px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+              <span className="truncate">{primarySource.site_name}</span>
             </span>
             {otherSourcesCount > 0 && (
-              <span className="bg-black/75 backdrop-blur-md text-violet-300 text-[10px] px-1.5 py-0.5 rounded-md">
+              <span className="bg-black/75 backdrop-blur-md text-violet-300 text-[10px] px-1.5 py-0.5 rounded-md shrink-0">
                 +{otherSourcesCount} เว็บสำรอง
               </span>
             )}
@@ -533,7 +537,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
       </div>
 
       {/* Card Body */}
-      <div className="p-3.5 flex-1 flex flex-col justify-between">
+      <div className="p-3 sm:p-3.5 flex-1 flex flex-col justify-between">
         <div>
           <div className="flex items-start justify-between gap-1.5">
             <h3 className="text-sm font-semibold text-gray-100 line-clamp-2 leading-snug group-hover:text-violet-300 transition-colors">
@@ -545,7 +549,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onStatusChange) {
-                    const statusCycle: ReadingStatus[] = ["reading", "on_hold", "completed", "dropped"];
+                    const statusCycle: ReadingStatus[] = ["reading", "on_hold", "completed", "dropped", "plan_to_read"];
                     const curIdx = statusCycle.indexOf(manga.status);
                     const nextStatus = statusCycle[(curIdx + 1) % statusCycle.length];
                     onStatusChange(manga.id, nextStatus);
@@ -560,7 +564,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
                     ? "bg-rose-700 text-white"
                     : "bg-purple-700 text-white"
                 }`}
-                title="คลิกเพื่อสลับสถานะการอ่าน (กำลังอ่าน ➔ ดองไว้ ➔ อ่านจบ ➔ เท)"
+                title="คลิกเพื่อสลับสถานะการอ่าน (กำลังอ่าน ➔ ดองไว้ ➔ อ่านจบ ➔ เท ➔ อยากอ่าน)"
               >
                 {manga.status === "completed"
                   ? "✅ จบ"
@@ -615,42 +619,42 @@ export const MangaCard: React.FC<MangaCardProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="mt-3 pt-2.5 border-t border-[#1F2E45]/60 flex items-center gap-2">
+        <div className="mt-3 pt-2.5 border-t border-[#1F2E45]/60 flex items-center gap-1.5 min-w-0">
           {/* Read Current Chapter */}
           <button
             onClick={handleOpenReader}
-            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold bg-[#1C2638] hover:bg-violet-600/80 text-gray-200 hover:text-white border border-[#1F2E45] transition active:scale-95"
+            className="flex-1 min-w-0 flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-[#1C2638] hover:bg-violet-600/80 text-gray-200 hover:text-white border border-[#1F2E45] transition active:scale-95 truncate"
             title={`เปิดอ่านตอนปัจจุบัน (ตอนที่ ${manga.current_chapter})`}
           >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>ตอนที่ {manga.current_chapter}</span>
+            <BookOpen className="w-3 h-3 shrink-0" />
+            <span className="truncate">ช.{manga.current_chapter}</span>
           </button>
 
           {/* Smart +1 & Open Next Chapter */}
           <button
             onClick={handleOpenNext}
-            className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-black transition active:scale-95 shadow shrink-0 ${
+            className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl text-[11px] font-black transition active:scale-95 shadow shrink-0 ${
               hasNewChapter
                 ? "bg-gradient-to-r from-orange-500 via-rose-500 to-pink-600 hover:from-orange-600 hover:to-rose-600 text-white shadow-orange-500/30 animate-pulse border border-orange-300/30"
                 : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30"
             }`}
             title={`เปิดอ่านตอนถัดไป (+1 เป็นตอนที่ ${manga.current_chapter + 1} และเปิดหน้าเว็บทันที)`}
           >
-            <ExternalLink className="w-3.5 h-3.5" />
-            <span>เปิด ช.{manga.current_chapter + 1}</span>
+            <ExternalLink className="w-3 h-3 shrink-0" />
+            <span>ช.{manga.current_chapter + 1}</span>
           </button>
 
           {/* Quick Sync to Latest Chapter Button */}
-          {hasNewChapter && onSyncToLatest && unreadCount > 1 && (
+          {showFastForward && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onSyncToLatest(manga.id, manga.latest_available_chapter!);
+                onSyncToLatest!(manga.id, manga.latest_available_chapter!);
               }}
-              className="flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 text-white shadow shadow-orange-500/30 transition active:scale-90 shrink-0"
+              className="flex items-center justify-center gap-0.5 px-2 py-1.5 rounded-xl text-[11px] font-black bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 text-white shadow shadow-orange-500/30 transition active:scale-90 shrink-0"
               title={`อ่านถึงตอนล่าสุดแล้ว: ข้ามไปตอนที่ ${manga.latest_available_chapter} ทันที`}
             >
-              <Zap className="w-3.5 h-3.5 fill-current text-yellow-200" />
+              <Zap className="w-3 h-3 fill-current text-yellow-200 shrink-0" />
               <span>ช.{manga.latest_available_chapter}</span>
             </button>
           )}
@@ -658,7 +662,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           {/* +1 Only Button */}
           <button
             onClick={handleIncrement}
-            className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-90 ${
+            className={`flex items-center justify-center gap-0.5 px-2 py-1.5 rounded-xl text-[11px] font-bold transition active:scale-90 shrink-0 ${
               justIncremented
                 ? "bg-emerald-600 text-white shadow-lg shadow-emerald-500/30"
                 : "bg-[#1E2B45] hover:bg-violet-600 text-gray-200 hover:text-white"
@@ -670,7 +674,7 @@ export const MangaCard: React.FC<MangaCardProps> = ({
             ) : (
               <Plus className="w-3.5 h-3.5" />
             )}
-            <span>+1</span>
+            <span className={showFastForward ? "hidden sm:inline" : ""}>+1</span>
           </button>
         </div>
       </div>

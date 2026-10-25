@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { Manga, MangaSource, TierRating } from "@/types/manga";
-import { getStoredCategories } from "@/lib/categories";
+import { getStoredCategories, isAdultCategory } from "@/lib/categories";
+import { deduplicateMangas, deduplicateSources, normalizeSourceUrl } from "@/lib/storage";
 import {
   X,
   Sparkles,
@@ -125,8 +126,9 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
       }
     }
 
-    if (!itemUrl || seen.has(itemUrl)) continue;
-    seen.add(itemUrl);
+    const normUrlKey = normalizeSourceUrl(itemUrl) || itemUrl;
+    if (!itemUrl || seen.has(normUrlKey)) continue;
+    seen.add(normUrlKey);
 
     // Extract chapter from userTitle or line text if present
     let chapter = 1;
@@ -196,13 +198,11 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   onAddManga,
   onAddMangas,
 }) => {
-  if (!isOpen) return null;
-
   // Active Tab: "batch" (default) or "single"
   const [activeTab, setActiveTab] = useState<"batch" | "single">("batch");
 
   // Available Categories
-  const [availableCategories] = useState<string[]>(getStoredCategories());
+  const [availableCategories, setAvailableCategories] = useState<string[]>(() => getStoredCategories());
   const [category, setCategory] = useState<string>("การ์ตูนทั่วไป");
   const [batchCategory, setBatchCategory] = useState<string>("การ์ตูนทั่วไป");
 
@@ -213,6 +213,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   const [warningMsg, setWarningMsg] = useState("");
   const [title, setTitle] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
+  const [triedCoverProxy, setTriedCoverProxy] = useState(false);
   const [chapter, setChapter] = useState<number>(1);
   const [siteName, setSiteName] = useState("");
   const [seriesUrl, setSeriesUrl] = useState("");
@@ -230,6 +231,22 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   >([]);
   const [batchFinished, setBatchFinished] = useState(false);
   const [batchError, setBatchError] = useState("");
+
+  // Quick Paste feedback states
+  const [pasteSingleSuccess, setPasteSingleSuccess] = useState(false);
+  const [pasteBatchSuccess, setPasteBatchSuccess] = useState(false);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setAvailableCategories(getStoredCategories());
+    }
+  }, [isOpen]);
+
+  React.useEffect(() => {
+    setTriedCoverProxy(false);
+  }, [coverUrl]);
+
+  if (!isOpen) return null;
 
   // Handle batch text input change
   const handleBatchTextChange = (text: string) => {
@@ -251,10 +268,6 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   const handleRemoveItem = (index: number) => {
     setBatchItems((prev) => prev.filter((_, idx) => idx !== index));
   };
-
-  // Quick Paste feedback states
-  const [pasteSingleSuccess, setPasteSingleSuccess] = useState(false);
-  const [pasteBatchSuccess, setPasteBatchSuccess] = useState(false);
 
   // Auto-scrape single URL (supports direct URL parameter from clipboard)
   const handleScrape = async (overrideUrl?: string, overrideTitle?: string, overrideChapter?: number | null) => {
@@ -545,17 +558,20 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         status: "reading",
         tier: "none",
         category: batchCategory || "การ์ตูนทั่วไป",
-        sources: [
-          {
-            id: sourceId,
-            manga_id: mangaId,
-            site_name: scrapedSite,
-            base_url: scrapedSeriesUrl || item.url,
-            current_chapter_url: item.url,
-            is_primary: true,
-            is_active: true,
-          },
-        ],
+        sources: deduplicateSources(
+          [
+            {
+              id: sourceId,
+              manga_id: mangaId,
+              site_name: scrapedSite,
+              base_url: scrapedSeriesUrl || item.url,
+              current_chapter_url: item.url,
+              is_primary: true,
+              is_active: true,
+            },
+          ],
+          mangaId
+        ),
         last_read_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -584,11 +600,13 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       }
     }
 
+    const dedupedBatch = deduplicateMangas(rescuedMangas);
+
     // Save all to database & storage
     if (onAddMangas) {
-      onAddMangas(rescuedMangas);
+      onAddMangas(dedupedBatch);
     } else {
-      rescuedMangas.forEach((m) => onAddManga(m));
+      dedupedBatch.forEach((m) => onAddManga(m));
     }
 
     setIsBatchRunning(false);
@@ -688,19 +706,19 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                           onClick={() => setBatchCategory(cat)}
                           className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
                             batchCategory === cat
-                              ? cat.toLowerCase().includes("dojin")
-                                ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
-                                : cat.toLowerCase().includes("ntr")
+                              ? cat.toLowerCase().includes("ntr")
                                 ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                                : isAdultCategory(cat)
+                                ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
                                 : "bg-violet-600 text-white shadow-md shadow-violet-600/30"
                               : "bg-[#0D1322] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
                           }`}
                         >
                           <span>
-                            {cat.toLowerCase().includes("dojin")
-                              ? "🔞 "
-                              : cat.toLowerCase().includes("ntr")
+                            {cat.toLowerCase().includes("ntr")
                               ? "💔 "
+                              : isAdultCategory(cat)
+                              ? "🔞 "
                               : "📚 "}
                             {cat}
                           </span>
@@ -851,7 +869,18 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                         >
                           <div className="w-8 h-10 rounded bg-[#0D1322] overflow-hidden shrink-0 border border-[#1F2E45]">
                             {r.coverUrl ? (
-                              <img src={r.coverUrl} alt="" className="w-full h-full object-cover" />
+                              <img
+                                src={r.coverUrl}
+                                alt=""
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  const img = e.currentTarget;
+                                  if (!img.src.includes("/api/image-proxy") && !r.coverUrl.startsWith("data:")) {
+                                    img.src = `/api/image-proxy?url=${encodeURIComponent(r.coverUrl)}`;
+                                  }
+                                }}
+                              />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-gray-600">
                                 <Globe className="w-3.5 h-3.5" />
@@ -1015,10 +1044,21 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                   <div className="w-24 aspect-[3/4] rounded-xl overflow-hidden bg-[#0B0F19] border border-[#1F2E45] shrink-0 shadow-md">
                     {coverUrl ? (
                       <img
-                        src={coverUrl}
+                        src={
+                          triedCoverProxy && !coverUrl.startsWith("/api/image-proxy") && !coverUrl.startsWith("data:")
+                            ? `/api/image-proxy?url=${encodeURIComponent(coverUrl)}`
+                            : coverUrl
+                        }
                         alt="Cover preview"
+                        referrerPolicy="no-referrer"
                         className="w-full h-full object-cover"
-                        onError={() => setCoverUrl("")}
+                        onError={() => {
+                          if (!triedCoverProxy && coverUrl && !coverUrl.startsWith("/api/image-proxy") && !coverUrl.startsWith("data:")) {
+                            setTriedCoverProxy(true);
+                          } else {
+                            setCoverUrl("");
+                          }
+                        }}
                       />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center text-gray-600">
@@ -1082,19 +1122,19 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                             onClick={() => setCategory(cat)}
                             className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
                               category === cat
-                                ? cat.toLowerCase().includes("dojin")
-                                  ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
-                                  : cat.toLowerCase().includes("ntr")
+                                ? cat.toLowerCase().includes("ntr")
                                   ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                                  : isAdultCategory(cat)
+                                  ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
                                   : "bg-violet-600 text-white shadow-md shadow-violet-600/30"
                                 : "bg-[#0D1322] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
                             }`}
                           >
                             <span>
-                              {cat.toLowerCase().includes("dojin")
-                                ? "🔞 "
-                                : cat.toLowerCase().includes("ntr")
+                              {cat.toLowerCase().includes("ntr")
                                 ? "💔 "
+                                : isAdultCategory(cat)
+                                ? "🔞 "
                                 : "📚 "}
                               {cat}
                             </span>

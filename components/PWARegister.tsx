@@ -40,11 +40,11 @@ export const PWARegister: React.FC = () => {
     setIsIOS(isIPhoneOrIPad);
 
     // 4. If iOS & NOT standalone & not previously dismissed -> Show prompt
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const dismissed = localStorage.getItem("mangahub_pwa_ios_hint_dismissed");
     if (isIPhoneOrIPad && !standaloneMode && !dismissed) {
       // Delay showing banner slightly so page loads smoothly first
-      const timer = setTimeout(() => setShowIOSPrompt(true), 2000);
-      return () => clearTimeout(timer);
+      timer = setTimeout(() => setShowIOSPrompt(true), 2000);
     }
 
     // 5. Handle Android / Chrome beforeinstallprompt
@@ -59,6 +59,7 @@ export const PWARegister: React.FC = () => {
     window.addEventListener("beforeinstallprompt", handleBeforeInstall);
     window.addEventListener("mangahub-open-install-pwa", handleOpenInstall);
     return () => {
+      if (timer) clearTimeout(timer);
       window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
       window.removeEventListener("mangahub-open-install-pwa", handleOpenInstall);
     };

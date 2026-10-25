@@ -18,6 +18,10 @@ import {
   checkMangaOnlineUpdate,
   touchMangaRead,
   autoFixMissingAndBadCovers,
+  computeNextChapterUrl,
+  getDeletedMangaIds,
+  getLastSyncError,
+  clearLastSyncError,
 } from "@/lib/storage";
 import {
   loadSupabaseConfig,
@@ -25,7 +29,7 @@ import {
   getSupabaseClient,
   fetchRemoteMangas,
 } from "@/lib/supabase";
-import { getStoredCategories } from "@/lib/categories";
+import { getStoredCategories, isAdultCategory } from "@/lib/categories";
 import { Header } from "@/components/Header";
 import { BottomNav } from "@/components/BottomNav";
 import { MangaCard } from "@/components/MangaCard";
@@ -35,7 +39,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { BackupModal } from "@/components/BackupModal";
 import { ReadingStatsModal } from "@/components/ReadingStatsModal";
 import { RandomPickerModal } from "@/components/RandomPickerModal";
-import { ReadingDashboardBanner } from "@/components/ReadingDashboardBanner";
+import { ReadingDashboardBanner, doesMangaMatchTagOrTheme } from "@/components/ReadingDashboardBanner";
 import {
   BookOpen,
   Plus,
@@ -134,11 +138,16 @@ export default function Home() {
     if (supabaseConfig.enabled) {
       setSyncStatus("syncing");
     }
+    clearLastSyncError();
     try {
       const res = await action();
       if (supabaseConfig.enabled) {
-        setSyncStatus("synced");
-        setLastSyncedAt(new Date());
+        if (getLastSyncError()) {
+          setSyncStatus("offline");
+        } else {
+          setSyncStatus("synced");
+          setLastSyncedAt(new Date());
+        }
       }
       return res;
     } catch (err) {
@@ -211,8 +220,10 @@ export default function Home() {
             setSyncStatus("syncing");
             const remote = await fetchRemoteMangas(client);
             if (remote && remote.length > 0) {
+              const deletedIds = getDeletedMangaIds();
+              const validRemote = remote.filter((m) => !deletedIds.has(m.id));
               const local = getLocalMangas();
-              const merged = deduplicateMangas([...local, ...remote]);
+              const merged = deduplicateMangas([...local, ...validRemote]);
               setMangas(merged);
               saveLocalMangas(merged);
             }
@@ -306,27 +317,29 @@ export default function Home() {
 
     const candidates = mangas.filter((m) => m.sources && m.sources.length > 0);
     let newUpdatesFound = 0;
-    let currentList = [...mangas];
 
     for (let i = 0; i < candidates.length; i++) {
       setCheckProgress({ current: i + 1, total: candidates.length });
-      const manga = candidates[i];
+      const candidate = candidates[i];
       try {
-        const res = await checkMangaOnlineUpdate(manga);
-        if (res.foundFromWeb && res.latestChapter && res.latestChapter !== manga.latest_available_chapter) {
-          if (res.hasUpdate && res.latestChapter > manga.current_chapter) {
+        // Read fresh manga from storage in case user incremented chapter during check
+        const freshManga = getLocalMangas().find((m) => m.id === candidate.id) || candidate;
+        const res = await checkMangaOnlineUpdate(freshManga);
+        if (res.foundFromWeb && res.latestChapter && res.latestChapter !== freshManga.latest_available_chapter) {
+          const latestFresh = getLocalMangas().find((m) => m.id === candidate.id) || freshManga;
+          if (res.hasUpdate && res.latestChapter > latestFresh.current_chapter) {
             newUpdatesFound++;
           }
           const updated: Manga = {
-            ...manga,
+            ...latestFresh,
             latest_available_chapter: res.latestChapter,
             updated_at: new Date().toISOString(),
           };
-          currentList = await upsertManga(updated);
+          const currentList = await upsertManga(updated);
           setMangas(currentList);
         }
       } catch (err) {
-        console.error("Error checking update for:", manga.title, err);
+        console.error("Error checking update for:", candidate.title, err);
       }
       // Small pause between web requests
       await new Promise((r) => setTimeout(r, 200));
@@ -392,6 +405,11 @@ export default function Home() {
 
   // Update existing manga
   const handleUpdateManga = async (updatedManga: Manga) => {
+    setSelectedManga((prev) => (prev && prev.id === updatedManga.id ? updatedManga : prev));
+    try {
+      const savedLastId = localStorage.getItem("mangahub_last_read_manga_id");
+      if (savedLastId) setLastReadMangaId(savedLastId);
+    } catch {}
     await trackSyncMutation(async () => {
       const updated = await upsertManga(updatedManga);
       setMangas(updated);
@@ -406,17 +424,24 @@ export default function Home() {
     });
   };
 
-  // Smart +1 & Open Next Chapter
+  // Smart +1 & Open Next Chapter (opens tab synchronously before async await for iOS Safari)
   const handleIncrementAndOpenNext = async (manga: Manga) => {
     setLastReadMangaId(manga.id);
+    const nextChapter = manga.current_chapter + 1;
+    const primarySource = manga.sources?.find((s) => s.is_primary) || manga.sources?.[0];
+    const nextUrl = primarySource
+      ? computeNextChapterUrl(primarySource.current_chapter_url || primarySource.base_url, nextChapter)
+      : null;
+
+    if (nextUrl) {
+      window.open(nextUrl, "_blank", "noopener,noreferrer");
+    } else {
+      setSelectedManga(manga);
+    }
+
     await trackSyncMutation(async () => {
-      const { updatedList, nextUrl, nextChapter } = await incrementAndOpenNextChapter(manga.id);
+      const { updatedList } = await incrementAndOpenNextChapter(manga.id);
       setMangas(updatedList);
-      if (nextUrl) {
-        window.open(nextUrl, "_blank", "noopener,noreferrer");
-      } else {
-        handleOpenReader(manga);
-      }
     });
   };
 
@@ -428,14 +453,9 @@ export default function Home() {
     });
   };
 
-  // Open reader and update recently read
+  // Open reader and update recently read (opens tab synchronously before async await for iOS Safari)
   const handleOpenReader = async (manga: Manga) => {
     setLastReadMangaId(manga.id);
-    await trackSyncMutation(async () => {
-      const updated = await touchMangaRead(manga.id);
-      setMangas(updated);
-    });
-
     const primarySource = manga.sources?.find((s) => s.is_primary) || manga.sources?.[0];
     const targetUrl = primarySource?.current_chapter_url || primarySource?.base_url;
     if (targetUrl) {
@@ -443,6 +463,11 @@ export default function Home() {
     } else {
       setSelectedManga(manga);
     }
+
+    await trackSyncMutation(async () => {
+      const updated = await touchMangaRead(manga.id);
+      setMangas(updated);
+    });
   };
 
   // Delete manga
@@ -525,9 +550,9 @@ export default function Home() {
         } else if (currentTab !== "all" && m.status !== currentTab) {
           return false;
         }
-        // Tag filter
+        // Tag or Theme filter
         if (selectedTag) {
-          if (!m.tags || !m.tags.includes(selectedTag)) {
+          if (!doesMangaMatchTagOrTheme(m, selectedTag)) {
             return false;
           }
         }
@@ -536,7 +561,7 @@ export default function Home() {
           const q = searchQuery.toLowerCase().trim();
           const matchTitle = m.title.toLowerCase().includes(q);
           const matchAlt = m.alt_title?.toLowerCase().includes(q);
-          const matchSources = m.sources.some(
+          const matchSources = (m.sources || []).some(
             (s) =>
               s.site_name.toLowerCase().includes(q) ||
               s.base_url.toLowerCase().includes(q)
@@ -786,10 +811,15 @@ export default function Home() {
                     src={recentlyReadManga.cover_url}
                     alt={recentlyReadManga.title}
                     referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const rawUrl = recentlyReadManga.cover_url || "";
+                      const img = e.currentTarget;
+                      if (rawUrl && !img.src.includes("/api/image-proxy") && !rawUrl.startsWith("data:")) {
+                        img.src = `/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
+                      }
+                    }}
                     className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
-                      isDiscreetMode &&
-                      (recentlyReadManga.category?.toLowerCase().includes("dojin") ||
-                        recentlyReadManga.category?.toLowerCase().includes("ntr"))
+                      isDiscreetMode && isAdultCategory(recentlyReadManga.category)
                         ? "blur-md"
                         : ""
                     }`}
@@ -932,8 +962,8 @@ export default function Home() {
             {availableCategories.map((cat) => {
               const isSelected = selectedCategory === cat;
               const count = mangas.filter((m) => (m.category || "การ์ตูนทั่วไป") === cat).length;
-              const isDojin = cat.toLowerCase().includes("dojin") || cat.includes("โดจิน");
               const isNTR = cat.toUpperCase().includes("NTR");
+              const isDojin = !isNTR && isAdultCategory(cat);
 
               return (
                 <button
@@ -1258,7 +1288,7 @@ export default function Home() {
                   : selectedTag
                   ? `ไม่มีเรื่องที่ติดแท็ก #${selectedTag} ลองคลิกแท็กอื่น หรือกดปุ่มด้านล่างเพื่อล้างแท็ก`
                   : searchQuery
-                  ? `ไม่พบเรื่องที่ตรงกับ "${searchQuery}" ลองค้นหาด้วยคำอื่น หรือกดเพิ่มเรื่องใหม่`
+                  ? `ไม่พบเรื่องที่ตรงกับ "${searchQuery}" ลองค้นหาด้วยคำอื่น หรือล้างคำค้นหา`
                   : "เริ่มต้นโดยการกดปุ่ม 'กู้ชีพแท็บ' เพื่อวางลิงก์จากแท็บการ์ตูนที่คุณกำลังอ่านอยู่ได้เลย"}
               </p>
               {currentTab === "has_update" && (
@@ -1278,32 +1308,40 @@ export default function Home() {
                 </div>
               )}
             </div>
-            {selectedTag && (
-              <button
-                onClick={() => setSelectedTag(null)}
-                className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow shadow-violet-600/30"
-              >
-                ล้างตัวกรองแท็ก (#{selectedTag})
-              </button>
-            )}
-            {currentTab === "has_update" ? (
-              <button
-                onClick={handleCheckAllUpdates}
-                disabled={isCheckingUpdates}
-                className="flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/30 transition"
-              >
-                <Flame className="w-4 h-4" />
-                <span>ตรวจหาตอนใหม่อีกครั้ง</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setIsAddOpen(true)}
-                className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition"
-              >
-                <Plus className="w-4 h-4" />
-                <span>เพิ่มการ์ตูนเรื่องแรก</span>
-              </button>
-            )}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {(searchQuery || selectedTag || selectedCategory !== "all" || selectedTier !== "all" || currentTab !== "all") && (
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSelectedTag(null);
+                    setSelectedCategory("all");
+                    setSelectedTier("all");
+                    setCurrentTab("all");
+                  }}
+                  className="bg-[#182338] hover:bg-[#223250] text-violet-300 hover:text-white border border-violet-500/40 text-xs font-bold px-4 py-2.5 rounded-xl transition shadow"
+                >
+                  ล้างตัวกรอง / คำค้นหาทั้งหมด
+                </button>
+              )}
+              {currentTab === "has_update" ? (
+                <button
+                  onClick={handleCheckAllUpdates}
+                  disabled={isCheckingUpdates}
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/30 transition"
+                >
+                  <Flame className="w-4 h-4" />
+                  <span>ตรวจหาตอนใหม่อีกครั้ง</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setIsAddOpen(true)}
+                  className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-violet-600/30 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{mangas.length > 0 ? "เพิ่มการ์ตูนเรื่องใหม่" : "เพิ่มการ์ตูนเรื่องแรก"}</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </main>
@@ -1324,6 +1362,7 @@ export default function Home() {
         onClose={() => setSelectedManga(null)}
         onUpdate={handleUpdateManga}
         onDelete={handleDeleteManga}
+        isDiscreetMode={isDiscreetMode}
       />
 
       <AddMangaModal
@@ -1377,6 +1416,7 @@ export default function Home() {
         onClose={() => setIsRandomOpen(false)}
         mangas={mangas}
         onOpenReader={handleOpenReader}
+        onIncrementAndOpenNext={handleIncrementAndOpenNext}
         onSelectManga={(m) => setSelectedManga(m)}
         isDiscreetMode={isDiscreetMode}
       />

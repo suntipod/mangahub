@@ -22,52 +22,18 @@ import {
   Zap,
   Tag,
   Sparkles,
+  Edit3,
 } from "lucide-react";
-import { computeNextChapterUrl, checkMangaOnlineUpdate } from "@/lib/storage";
-import { getStoredCategories } from "@/lib/categories";
+import { computeNextChapterUrl, checkMangaOnlineUpdate, recordReadEvent, deduplicateSources } from "@/lib/storage";
+import { getStoredCategories, isAdultCategory } from "@/lib/categories";
 
 interface MangaDetailModalProps {
   manga: Manga | null;
   onClose: () => void;
   onUpdate: (updated: Manga) => void;
   onDelete: (id: string) => void;
+  isDiscreetMode?: boolean;
 }
-
-export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
-  manga,
-  onClose,
-  onUpdate,
-  onDelete,
-}) => {
-  if (!manga) return null;
-
-  const [currentChapter, setCurrentChapter] = useState(manga.current_chapter);
-  const [status, setStatus] = useState<ReadingStatus>(manga.status);
-  const [tier, setTier] = useState<TierRating>(manga.tier);
-  const [category, setCategory] = useState<string>(manga.category || "การ์ตูนทั่วไป");
-  const [tags, setTags] = useState<string[]>(manga.tags || []);
-  const [newTagInput, setNewTagInput] = useState("");
-  const [availableCategories] = useState<string[]>(getStoredCategories());
-  const [notes, setNotes] = useState(manga.notes || "");
-  const [sources, setSources] = useState<MangaSource[]>(manga.sources);
-  const [newSourceUrl, setNewSourceUrl] = useState("");
-  const [newSourceName, setNewSourceName] = useState("");
-  const [showAddSource, setShowAddSource] = useState(false);
-  const [savedSuccess, setSavedSuccess] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
-
-  // Cover image states
-  const [coverUrl, setCoverUrl] = useState(manga.cover_url || "");
-  const [displayCover, setDisplayCover] = useState(manga.cover_url || "");
-  const [triedDetailProxy, setTriedDetailProxy] = useState(false);
-  const [coverImgError, setCoverImgError] = useState(false);
-
-  useEffect(() => {
-    setDisplayCover(coverUrl);
-    setTriedDetailProxy(false);
-    setCoverImgError(false);
-  }, [coverUrl]);
 
 // Helper to clean raw title into clean English/Romaji or pure title for search
 function getCleanCoverSearchTitle(rawTitle: string): string {
@@ -86,22 +52,39 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
     .trim();
 }
 
-  // Synchronize state when manga prop changes
-  useEffect(() => {
-    if (manga) {
-      setCurrentChapter(manga.current_chapter);
-      setStatus(manga.status);
-      setTier(manga.tier);
-      setCategory(manga.category || "การ์ตูนทั่วไป");
-      setTags(manga.tags || []);
-      setNotes(manga.notes || "");
-      setSources(manga.sources || []);
-      setCoverUrl(manga.cover_url || "");
-      setDisplayCover(manga.cover_url || "");
-      setLatestChapter(manga.latest_available_chapter);
-      setSearchCoverQuery(getCleanCoverSearchTitle(manga.title));
-    }
-  }, [manga]);
+export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
+  manga,
+  onClose,
+  onUpdate,
+  onDelete,
+  isDiscreetMode = false,
+}) => {
+  const [title, setTitle] = useState(manga?.title || "");
+  const [altTitle, setAltTitle] = useState(manga?.alt_title || "");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [currentChapter, setCurrentChapter] = useState(manga?.current_chapter ?? 1);
+  const [status, setStatus] = useState<ReadingStatus>(manga?.status || "reading");
+  const [tier, setTier] = useState<TierRating>(manga?.tier || "none");
+  const [category, setCategory] = useState<string>(manga?.category || "การ์ตูนทั่วไป");
+  const [tags, setTags] = useState<string[]>(manga?.tags || []);
+  const [newTagInput, setNewTagInput] = useState("");
+  const [availableCategories, setAvailableCategories] = useState<string[]>(() => getStoredCategories());
+  const [notes, setNotes] = useState(manga?.notes || "");
+  const [sources, setSources] = useState<MangaSource[]>(manga?.sources || []);
+  const [newSourceUrl, setNewSourceUrl] = useState("");
+  const [newSourceName, setNewSourceName] = useState("");
+  const [showAddSource, setShowAddSource] = useState(false);
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [editSourceName, setEditSourceName] = useState("");
+  const [editSourceUrl, setEditSourceUrl] = useState("");
+  const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Cover image states
+  const [coverUrl, setCoverUrl] = useState(manga?.cover_url || "");
+  const [displayCover, setDisplayCover] = useState(manga?.cover_url || "");
+  const [triedDetailProxy, setTriedDetailProxy] = useState(false);
+  const [coverImgError, setCoverImgError] = useState(false);
 
   const [searchCoverQuery, setSearchCoverQuery] = useState(
     manga ? getCleanCoverSearchTitle(manga.title) : ""
@@ -119,7 +102,7 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
 
   // Chapter update states
   const [latestChapter, setLatestChapter] = useState<number | undefined>(
-    manga.latest_available_chapter
+    manga?.latest_available_chapter
   );
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateCheckMsg, setUpdateCheckMsg] = useState<{
@@ -128,11 +111,42 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
     isError?: boolean;
   } | null>(null);
 
+  useEffect(() => {
+    setDisplayCover(coverUrl);
+    setTriedDetailProxy(false);
+    setCoverImgError(false);
+  }, [coverUrl]);
+
+  // Synchronize state when manga prop changes
+  useEffect(() => {
+    if (manga) {
+      setTitle(manga.title || "");
+      setAltTitle(manga.alt_title || "");
+      setIsEditingTitle(false);
+      setCurrentChapter(manga.current_chapter);
+      setStatus(manga.status);
+      setTier(manga.tier);
+      setCategory(manga.category || "การ์ตูนทั่วไป");
+      setAvailableCategories(getStoredCategories());
+      setTags(manga.tags || []);
+      setNotes(manga.notes || "");
+      setSources(manga.sources || []);
+      setEditingSourceId(null);
+      setCoverUrl(manga.cover_url || "");
+      setDisplayCover(manga.cover_url || "");
+      setLatestChapter(manga.latest_available_chapter);
+      setSearchCoverQuery(getCleanCoverSearchTitle(manga.title));
+    }
+  }, [manga]);
+
+  if (!manga) return null;
+
   // Search official covers from AniList, Kitsu, MangaDex & Web
   const handleSearchCovers = async () => {
     const q =
       searchCoverQuery.trim() ||
-      getCleanCoverSearchTitle(manga.title) ||
+      getCleanCoverSearchTitle(title || manga.title) ||
+      title ||
       manga.title;
     if (!q) return;
     setIsSearchingCover(true);
@@ -256,7 +270,7 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
       is_active: true,
     };
 
-    setSources([...sources, newSource]);
+    setSources(deduplicateSources([...sources, newSource], manga.id));
     setNewSourceUrl("");
     setNewSourceName("");
     setShowAddSource(false);
@@ -280,8 +294,23 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
   // Save changes
   const handleSave = async () => {
     setIsSaving(true);
+    const prevChapter = Number(manga.current_chapter) || 0;
+    if (currentChapter > prevChapter) {
+      recordReadEvent(
+        manga.id,
+        title.trim() || manga.title || "ไม่ระบุชื่อ",
+        currentChapter,
+        Math.max(1, currentChapter - prevChapter),
+        "increment"
+      );
+      try {
+        localStorage.setItem("mangahub_last_read_manga_id", manga.id);
+      } catch {}
+    }
     const updated: Manga = {
       ...manga,
+      title: title.trim() || manga.title,
+      alt_title: altTitle.trim() || undefined,
       cover_url: coverUrl.trim(),
       current_chapter: currentChapter,
       latest_available_chapter: latestChapter,
@@ -290,7 +319,7 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
       category,
       tags,
       notes,
-      sources,
+      sources: deduplicateSources(sources, manga.id),
       last_read_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -332,7 +361,7 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
               {displayCover && !coverImgError ? (
                 <img
                   src={displayCover}
-                  alt={manga.title}
+                  alt={title || manga.title}
                   referrerPolicy="no-referrer"
                   onError={() => {
                     if (
@@ -347,7 +376,11 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
                       setCoverImgError(true);
                     }
                   }}
-                  className="w-full h-full object-cover"
+                  className={`w-full h-full object-cover ${
+                    isDiscreetMode && isAdultCategory(category)
+                      ? "blur-xl scale-110 hover:blur-none transition-all duration-300"
+                      : ""
+                  }`}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-gray-600">
@@ -357,11 +390,51 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
             </div>
 
             <div className="flex-1 min-w-0">
-              <h1 className="text-lg font-bold text-white leading-snug">
-                {manga.title}
-              </h1>
-              {manga.alt_title && (
-                <p className="text-xs text-gray-400 mt-0.5">{manga.alt_title}</p>
+              {isEditingTitle ? (
+                <div className="space-y-1.5 mb-2">
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="ชื่อเรื่องการ์ตูน..."
+                    className="w-full bg-[#0B0F19] border border-violet-500 rounded-xl px-2.5 py-1.5 text-sm font-bold text-white outline-none"
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={altTitle}
+                      onChange={(e) => setAltTitle(e.target.value)}
+                      placeholder="ชื่อรอง / ชื่อภาษาอังกฤษ (ไม่บังคับ)..."
+                      className="flex-1 bg-[#0B0F19] border border-[#1F2E45] focus:border-violet-500 rounded-xl px-2.5 py-1 text-xs text-gray-300 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingTitle(false)}
+                      className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold shrink-0"
+                    >
+                      ตกลง
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="group/title flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h1 className="text-lg font-bold text-white leading-snug">
+                      {title || manga.title}
+                    </h1>
+                    {altTitle && (
+                      <p className="text-xs text-gray-400 mt-0.5">{altTitle}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingTitle(true)}
+                    className="p-1.5 rounded-lg bg-[#141E33] hover:bg-[#1E2B45] text-gray-400 hover:text-violet-300 border border-[#1F2E45] transition shrink-0"
+                    title="แก้ไขชื่อเรื่อง"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
 
               {/* Status Selector Buttons */}
@@ -420,10 +493,10 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
                 >
                   {availableCategories.map((cat) => (
                     <option key={cat} value={cat}>
-                      {cat.toLowerCase().includes("dojin")
-                        ? "🔞 "
-                        : cat.toLowerCase().includes("ntr")
+                      {cat.toLowerCase().includes("ntr")
                         ? "💔 "
+                        : isAdultCategory(cat)
+                        ? "🔞 "
                         : "📚 "}
                       {cat}
                     </option>
@@ -536,6 +609,15 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
                       <img
                         src={r.coverUrl}
                         alt={r.title}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const img = e.currentTarget;
+                          if (!img.src.includes("/api/image-proxy") && !r.coverUrl.startsWith("data:")) {
+                            img.src = `/api/image-proxy?url=${encodeURIComponent(r.coverUrl)}`;
+                          } else {
+                            img.style.display = "none";
+                          }
+                        }}
                         className="w-full h-full object-cover group-hover/cover:scale-105 transition duration-300"
                       />
                       {coverUrl === r.coverUrl && (
@@ -615,12 +697,49 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
               type="button"
               onClick={() => {
                 const nextCh = currentChapter + 1;
-                handleChapterChange(nextCh);
-                const primary = sources.find((s) => s.is_primary) || sources[0];
+                const updatedSources = deduplicateSources(
+                  sources.map((s) => ({
+                    ...s,
+                    current_chapter_url: computeNextChapterUrl(s.current_chapter_url || s.base_url, nextCh),
+                  })),
+                  manga.id
+                );
+                setCurrentChapter(nextCh);
+                setSources(updatedSources);
+                const primary = updatedSources.find((s) => s.is_primary) || updatedSources[0];
                 if (primary) {
-                  const nextUrl = computeNextChapterUrl(primary.current_chapter_url || primary.base_url, nextCh);
-                  window.open(nextUrl, "_blank", "noopener,noreferrer");
+                  const nextUrl = primary.current_chapter_url || primary.base_url;
+                  if (nextUrl) {
+                    window.open(nextUrl, "_blank", "noopener,noreferrer");
+                  }
                 }
+                recordReadEvent(
+                  manga.id,
+                  title.trim() || manga.title || "ไม่ระบุชื่อ",
+                  nextCh,
+                  1,
+                  "increment"
+                );
+                try {
+                  localStorage.setItem("mangahub_last_read_manga_id", manga.id);
+                } catch {}
+                const nowIso = new Date().toISOString();
+                onUpdate({
+                  ...manga,
+                  title: title.trim() || manga.title,
+                  alt_title: altTitle.trim() || undefined,
+                  cover_url: coverUrl.trim(),
+                  current_chapter: nextCh,
+                  latest_available_chapter: latestChapter,
+                  status,
+                  tier,
+                  category,
+                  tags,
+                  notes,
+                  sources: updatedSources,
+                  last_read_at: nowIso,
+                  updated_at: nowIso,
+                });
               }}
               className="w-full mt-3 flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/30 transition active:scale-98"
             >
@@ -736,50 +855,111 @@ function getCleanCoverSearchTitle(rawTitle: string): string {
               {sources.map((s) => (
                 <div
                   key={s.id}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition ${
+                  className={`p-3 rounded-xl border transition space-y-2 ${
                     s.is_primary
                       ? "bg-violet-950/20 border-violet-500/40"
                       : "bg-[#0F1626] border-[#1F2E45]"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-sm font-semibold text-gray-200">
-                      {s.site_name}
-                    </span>
-                    {s.is_primary ? (
-                      <span className="text-[10px] bg-violet-600/30 text-violet-300 px-2 py-0.5 rounded-full font-bold border border-violet-500/40">
-                        เว็บหลัก (1-Tap Read)
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-sm font-semibold text-gray-200 truncate">
+                        {s.site_name}
                       </span>
-                    ) : (
+                      {s.is_primary ? (
+                        <span className="text-[10px] bg-violet-600/30 text-violet-300 px-2 py-0.5 rounded-full font-bold border border-violet-500/40 shrink-0">
+                          เว็บหลัก (1-Tap Read)
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleSetPrimary(s.id)}
+                          className="text-[10px] text-gray-400 hover:text-violet-300 underline shrink-0"
+                        >
+                          ตั้งเป็นเว็บหลัก
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
-                        onClick={() => handleSetPrimary(s.id)}
-                        className="text-[10px] text-gray-400 hover:text-violet-300 underline"
+                        type="button"
+                        onClick={() => {
+                          if (editingSourceId === s.id) {
+                            setEditingSourceId(null);
+                          } else {
+                            setEditingSourceId(s.id);
+                            setEditSourceName(s.site_name);
+                            setEditSourceUrl(s.current_chapter_url || s.base_url);
+                          }
+                        }}
+                        className="p-1.5 rounded-lg bg-[#182338] hover:bg-violet-600 text-gray-300 hover:text-white transition"
+                        title="แก้ไขลิงก์เว็บนี้"
                       >
-                        ตั้งเป็นเว็บหลัก
+                        <Edit3 className="w-3.5 h-3.5" />
                       </button>
-                    )}
+                      <a
+                        href={s.current_chapter_url || s.base_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-lg bg-[#182338] hover:bg-violet-600 text-gray-300 hover:text-white transition"
+                        title="ทดสอบเปิดอ่านเว็บนี้"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      {sources.length > 1 && (
+                        <button
+                          onClick={() => handleRemoveSource(s.id)}
+                          className="p-1.5 rounded-lg hover:bg-red-950/40 text-gray-400 hover:text-red-400 transition"
+                          title="ลบเว็บนี้"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <a
-                      href={s.current_chapter_url || s.base_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 rounded-lg bg-[#182338] hover:bg-violet-600 text-gray-300 hover:text-white transition"
-                      title="ทดสอบเปิดอ่านเว็บนี้"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                    {sources.length > 1 && (
+                  {editingSourceId === s.id && (
+                    <div className="pt-2 border-t border-[#1F2E45] flex flex-col sm:flex-row gap-2 animate-fade-in">
+                      <input
+                        type="text"
+                        value={editSourceName}
+                        onChange={(e) => setEditSourceName(e.target.value)}
+                        placeholder="ชื่อเว็บ..."
+                        className="sm:w-32 bg-[#0B0F19] border border-[#1F2E45] focus:border-violet-500 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={editSourceUrl}
+                        onChange={(e) => setEditSourceUrl(e.target.value)}
+                        placeholder="URL เว็บอ่าน..."
+                        className="flex-1 bg-[#0B0F19] border border-[#1F2E45] focus:border-violet-500 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 outline-none font-mono"
+                      />
                       <button
-                        onClick={() => handleRemoveSource(s.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-950/40 text-gray-400 hover:text-red-400 transition"
-                        title="ลบเว็บนี้"
+                        type="button"
+                        onClick={() => {
+                          const trimmedUrl = editSourceUrl.trim();
+                          if (trimmedUrl) {
+                            setSources(
+                              sources.map((item) =>
+                                item.id === s.id
+                                  ? {
+                                      ...item,
+                                      site_name: editSourceName.trim() || item.site_name,
+                                      base_url: trimmedUrl,
+                                      current_chapter_url: computeNextChapterUrl(trimmedUrl, currentChapter),
+                                    }
+                                  : item
+                              )
+                            );
+                          }
+                          setEditingSourceId(null);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        บันทึกเว็บ
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

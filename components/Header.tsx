@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Cloud, CloudOff, Wifi, Flame, Loader2, Eye, EyeOff, Database, Dices, BarChart3, Smartphone } from "lucide-react";
+import { BookOpen, RefreshCw, Settings, Plus, Wifi, Flame, Loader2, Eye, EyeOff, Database, Dices, BarChart3, Smartphone, X } from "lucide-react";
 import { SupabaseConfig, CloudSyncStatus } from "@/types/manga";
 
 interface HeaderProps {
@@ -49,20 +49,20 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-[#090D16]/95 backdrop-blur-md border-b border-[#1F2E45] px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] sm:px-6">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
         {/* Brand / Title */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/20 shrink-0">
             <BookOpen className="w-5 h-5 text-white" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-1.5">
               Manga<span className="text-violet-400">Hub</span>
             </h1>
             <div className="flex items-center gap-1.5 text-xs pt-0.5">
               <button
                 type="button"
-                onClick={onSync}
+                onClick={syncStatus === "disabled" ? onOpenSettings : onSync}
                 disabled={isSyncing}
                 title={
                   syncStatus === "syncing"
@@ -121,27 +121,36 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-
         {/* Search input (Hidden on small screens) */}
-        <div className="flex-1 max-w-md hidden sm:block">
+        <div className="relative flex-1 max-w-md hidden sm:block">
           <input
             type="text"
             placeholder="ค้นหาชื่อการ์ตูน..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-xl px-4 py-2 text-sm text-gray-200 placeholder-gray-500 outline-none transition"
+            className="w-full bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-xl pl-4 pr-9 py-2 text-sm text-gray-200 placeholder-gray-500 outline-none transition"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => onSearchChange("")}
+              title="ล้างคำค้นหา"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:text-white hover:bg-[#1F2E45]/60 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Check Updates Button */}
           {onCheckUpdates && (
             <button
               onClick={onCheckUpdates}
               disabled={isCheckingUpdates}
               title="ตรวจหาตอนใหม่จากเว็บทั้งหมด"
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition shadow-sm ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold transition shadow-sm ${
                 isCheckingUpdates
                   ? "bg-orange-500/20 text-orange-400 border border-orange-500/30 cursor-not-allowed"
                   : "bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white shadow-orange-500/20 active:scale-95"
@@ -194,7 +203,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onSync}
             disabled={isSyncing}
             title="รีเฟรช / ซิงค์ข้อมูล"
-            className={`p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-gray-300 transition ${
+            className={`p-2 sm:p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-gray-300 transition ${
               isSyncing ? "opacity-50 cursor-not-allowed" : ""
             }`}
           >
@@ -209,23 +218,23 @@ export const Header: React.FC<HeaderProps> = ({
             <span>กู้ชีพแท็บ Safari</span>
           </button>
 
-          {/* Random Picker Button (วันนี้อ่านอะไรดี? 🎲) */}
+          {/* Random Picker Button (วันนี้อ่านอะไรดี? 🎲) - Hidden on mobile since BottomNav has it */}
           {onOpenRandom && (
             <button
               onClick={onOpenRandom}
               title="วันนี้อ่านเรื่องอะไรดี? (สุ่มการ์ตูนเด็ดมาให้อ่าน 🎲)"
-              className="p-2.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 border border-amber-500/40 text-amber-300 hover:text-amber-200 transition active:scale-95"
+              className="hidden sm:flex p-2.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 border border-amber-500/40 text-amber-300 hover:text-amber-200 transition active:scale-95"
             >
               <Dices className="w-4 h-4" />
             </button>
           )}
 
-          {/* Reading Stats Button (สถิติการอ่าน 📊) */}
+          {/* Reading Stats Button (สถิติการอ่าน 📊) - Hidden on mobile since BottomNav has it */}
           {onOpenStats && (
             <button
               onClick={onOpenStats}
               title="สถิติการอ่านส่วนตัว (Reading Stats 📊)"
-              className="p-2.5 rounded-xl bg-violet-950/40 hover:bg-violet-900/50 border border-violet-500/40 text-violet-300 hover:text-violet-200 transition active:scale-95"
+              className="hidden sm:flex p-2.5 rounded-xl bg-violet-950/40 hover:bg-violet-900/50 border border-violet-500/40 text-violet-300 hover:text-violet-200 transition active:scale-95"
             >
               <BarChart3 className="w-4 h-4" />
             </button>
@@ -236,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenBackup}
               title="สำรองและกู้คืนข้อมูล (Backup & Restore JSON / Excel CSV)"
-              className="p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-emerald-400 hover:text-emerald-300 transition"
+              className="hidden sm:flex p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-emerald-400 hover:text-emerald-300 transition"
             >
               <Database className="w-4 h-4" />
             </button>
@@ -247,7 +256,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenInstallPwa}
               title="วิธีติดตั้งลงมือถือ / เปิดใช้งานเต็มจอ (PWA App)"
-              className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-violet-600/30 to-indigo-600/30 hover:from-violet-600/50 hover:to-indigo-600/50 border border-violet-500/40 text-violet-200 transition active:scale-95"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-violet-600/30 to-indigo-600/30 hover:from-violet-600/50 hover:to-indigo-600/50 border border-violet-500/40 text-violet-200 transition active:scale-95"
             >
               <Smartphone className="w-4 h-4 text-violet-400 shrink-0" />
               <span className="hidden lg:inline text-[11px]">ติดตั้งแอป</span>
@@ -257,23 +266,32 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenSettings}
             title="ตั้งค่าระบบ / Supabase"
-            className="p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-gray-300 transition"
+            className="hidden sm:flex p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-gray-300 transition"
           >
             <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-
       {/* Mobile Search input */}
-      <div className="mt-2.5 sm:hidden">
+      <div className="relative mt-2.5 sm:hidden">
         <input
           type="text"
           placeholder="ค้นหาชื่อการ์ตูน..."
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-xl px-3.5 py-2 text-sm text-gray-200 placeholder-gray-500 outline-none transition"
+          className="w-full bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-xl pl-3.5 pr-9 py-2 text-sm text-gray-200 placeholder-gray-500 outline-none transition"
         />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => onSearchChange("")}
+            title="ล้างคำค้นหา"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:text-white hover:bg-[#1F2E45]/60 transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </header>
   );

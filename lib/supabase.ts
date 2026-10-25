@@ -3,9 +3,12 @@ import { Manga, MangaSource, SupabaseConfig } from "@/types/manga";
 
 const CONFIG_KEY = "mangahub_supabase_config";
 
+const FALLBACK_SUPABASE_URL = "https://ciykssexuqlsphjrhmbk.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNpeWtzc2V4dXFsc3BoanJobWJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4MzI4ODgsImV4cCI6MjEwNjQwODg4OH0.Kvn6vaM37zrBlUWmb_hDE_5nGzsAUYDbJDjSvquryVY";
+
 export const DEFAULT_SUPABASE_CONFIG: SupabaseConfig = {
-  url: "https://ciykssexuqlsphjrhmbk.supabase.co",
-  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNpeWtzc2V4dXFsc3BoanJobWJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4MzI4ODgsImV4cCI6MjEwNjQwODg4OH0.Kvn6vaM37zrBlUWmb_hDE_5nGzsAUYDbJDjSvquryVY",
+  url: process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL,
+  anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY,
   enabled: true,
 };
 
@@ -86,8 +89,14 @@ export function getSupabaseClient(config?: SupabaseConfig): SupabaseClient | nul
 // Test Supabase connection
 export async function testSupabaseConnection(url: string, anonKey: string): Promise<{ success: boolean; message: string }> {
   try {
-    const client = createClient(url, anonKey);
-    const { data, error } = await client.from("mangas").select("id").limit(1);
+    const client = createClient(url, anonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
+    const { error } = await client.from("mangas").select("id").limit(1);
     if (error) {
       return { success: false, message: `เชื่อมต่อไม่สำเร็จ: ${error.message}` };
     }
@@ -137,6 +146,8 @@ export function encodeNotesWithCategory(notes?: string, category?: string, tags?
   return `[category:${cat}]${tagStr} ${cleanNotes}`.trim();
 }
 
+let remoteSupportsCategoryColumns: boolean | null = null;
+
 // Fetch all mangas and their sources from Supabase
 export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]> {
   const { data: mangasData, error: mError } = await client
@@ -146,6 +157,10 @@ export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]
 
   if (mError) throw mError;
   if (!mangasData) return [];
+
+  if (mangasData.length > 0 && typeof mangasData[0] === "object" && mangasData[0] !== null) {
+    remoteSupportsCategoryColumns = "category" in mangasData[0] && "tags" in mangasData[0];
+  }
 
   const { data: sourcesData, error: sError } = await client
     .from("manga_sources")
@@ -162,25 +177,36 @@ export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]
       site_name: s.site_name,
       base_url: s.base_url,
       current_chapter_url: s.current_chapter_url,
-      is_primary: s.is_primary,
-      is_active: s.is_active,
+      is_primary: Boolean(s.is_primary),
+      is_active: s.is_active !== false,
     });
     sourcesByMangaId.set(s.manga_id, list);
   });
 
   return mangasData.map((m: any) => {
     const { notes: decodedNotes, category: decodedCat, tags: decodedTags } = decodeNotesAndCategory(m.notes);
+    const hasExplicitNotesCat = /\[category:[^\]]+\]/i.test(m.notes || "");
+    const resolvedCategory =
+      m.category && m.category !== "การ์ตูนทั่วไป"
+        ? m.category
+        : hasExplicitNotesCat
+        ? decodedCat
+        : m.category || decodedCat;
+    const resolvedTags =
+      Array.isArray(m.tags) && m.tags.length > 0 ? m.tags : decodedTags;
+
     return {
       id: m.id,
       title: m.title,
       alt_title: m.alt_title,
-      cover_url: m.cover_url,
-      current_chapter: Number(m.current_chapter),
-      latest_available_chapter: m.latest_available_chapter ? Number(m.latest_available_chapter) : undefined,
+      cover_url: m.cover_url || "",
+      current_chapter: Number(m.current_chapter) || 0,
+      latest_available_chapter:
+        m.latest_available_chapter != null ? Number(m.latest_available_chapter) : undefined,
       status: m.status,
       tier: m.tier || "none",
-      category: m.category || decodedCat,
-      tags: m.tags || decodedTags,
+      category: resolvedCategory,
+      tags: resolvedTags,
       notes: decodedNotes,
       sources: sourcesByMangaId.get(m.id) || [],
       last_read_at: m.last_read_at,
@@ -190,46 +216,113 @@ export async function fetchRemoteMangas(client: SupabaseClient): Promise<Manga[]
   });
 }
 
-// Upsert manga and sources to Supabase
-export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): Promise<void> {
-  const mangaId = ensureUUID(manga.id);
+// Per-manga serialization queue to avoid race conditions on rapid +1 clicks
+const syncQueues = new Map<string, Promise<void>>();
+
+async function doSyncMangaToRemote(client: SupabaseClient, manga: Manga, mangaId: string): Promise<void> {
   const encodedNotes = encodeNotesWithCategory(manga.notes, manga.category, manga.tags);
 
-  const { error: mError } = await client.from("mangas").upsert({
+  const baseRow = {
     id: mangaId,
     title: manga.title,
-    alt_title: manga.alt_title,
+    alt_title: manga.alt_title || null,
     cover_url: manga.cover_url?.trim() || null,
-
-    current_chapter: manga.current_chapter,
-    latest_available_chapter: manga.latest_available_chapter,
+    current_chapter: Number(manga.current_chapter) || 0,
+    latest_available_chapter: manga.latest_available_chapter ?? null,
     status: manga.status,
     tier: manga.tier,
     notes: encodedNotes,
     last_read_at: manga.last_read_at,
     updated_at: manga.updated_at || new Date().toISOString(),
-  });
+  };
 
-  if (mError) throw mError;
+  if (remoteSupportsCategoryColumns !== false) {
+    const { error: extError } = await client.from("mangas").upsert({
+      ...baseRow,
+      category: manga.category || "การ์ตูนทั่วไป",
+      tags: Array.isArray(manga.tags) ? manga.tags : [],
+    });
+    if (!extError) {
+      remoteSupportsCategoryColumns = true;
+    } else if (/column.*(category|tags)|schema cache|PGRST204/i.test(extError.message || "")) {
+      remoteSupportsCategoryColumns = false;
+      const { error: mError } = await client.from("mangas").upsert(baseRow);
+      if (mError) throw mError;
+    } else {
+      throw extError;
+    }
+  } else {
+    const { error: mError } = await client.from("mangas").upsert(baseRow);
+    if (mError) throw mError;
+  }
 
-  // Upsert sources: cleanly replace sources so backup links and primary flags stay in sync
-  if (manga.sources && manga.sources.length > 0) {
-    const sourcesToUpsert = manga.sources.map((s) => ({
-      id: ensureUUID(s.id),
-      manga_id: mangaId,
-      site_name: s.site_name,
-      base_url: s.base_url,
-      current_chapter_url: s.current_chapter_url,
-      is_primary: s.is_primary,
-      is_active: s.is_active,
-    }));
+  const rawSources = Array.isArray(manga.sources) ? manga.sources : [];
+  if (rawSources.length > 0) {
+    // Enforce exactly 1 primary source
+    let primaryAssigned = false;
+    const primaryIdx = rawSources.findIndex((s) => s.is_primary);
+    const targetPrimaryIdx = primaryIdx >= 0 ? primaryIdx : 0;
 
-    try {
-      await client.from("manga_sources").delete().eq("manga_id", mangaId);
-    } catch {}
+    const sourcesToUpsert = rawSources.map((s, idx) => {
+      const isPrimary = !primaryAssigned && idx === targetPrimaryIdx;
+      if (isPrimary) primaryAssigned = true;
+      return {
+        id: ensureUUID(s.id),
+        manga_id: mangaId,
+        site_name: s.site_name || "เว็บอ่าน",
+        base_url: s.base_url || s.current_chapter_url || "",
+        current_chapter_url: s.current_chapter_url || s.base_url || "",
+        is_primary: isPrimary,
+        is_active: s.is_active !== false,
+      };
+    });
 
-    const { error: sError } = await client.from("manga_sources").upsert(sourcesToUpsert);
+    // 1. Upsert current sources first (atomic, never leaves manga with 0 sources during rapid clicks)
+    const { error: sError } = await client.from("manga_sources").upsert(sourcesToUpsert, { onConflict: "id" });
     if (sError) throw sError;
+
+    // 2. Delete only removed sources for this mangaId
+    const keepIds = new Set(sourcesToUpsert.map((s) => s.id));
+    const { data: existingSources } = await client
+      .from("manga_sources")
+      .select("id")
+      .eq("manga_id", mangaId);
+
+    const toDeleteIds = (existingSources || [])
+      .map((s: any) => s.id)
+      .filter((id: string) => !keepIds.has(id));
+
+    if (toDeleteIds.length > 0) {
+      await client.from("manga_sources").delete().in("id", toDeleteIds);
+    }
+  } else {
+    await client.from("manga_sources").delete().eq("manga_id", mangaId);
+  }
+}
+
+// Upsert manga and sources to Supabase (serialized per mangaId)
+export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): Promise<void> {
+  const mangaId = ensureUUID(manga.id);
+  const prev = syncQueues.get(mangaId) || Promise.resolve();
+  let syncError: any = null;
+
+  const next = prev
+    .catch(() => {})
+    .then(async () => {
+      try {
+        await doSyncMangaToRemote(client, manga, mangaId);
+      } catch (err) {
+        syncError = err;
+      }
+    });
+
+  syncQueues.set(mangaId, next);
+  await next;
+  if (syncQueues.get(mangaId) === next) {
+    syncQueues.delete(mangaId);
+  }
+  if (syncError) {
+    throw syncError;
   }
 }
 

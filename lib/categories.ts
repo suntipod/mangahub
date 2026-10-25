@@ -49,3 +49,14 @@ export function deleteCategory(name: string): string[] {
   }
   return updated;
 }
+
+export function isAdultCategory(category?: string): boolean {
+  const catLower = (category || "").toLowerCase();
+  if (!catLower) return false;
+  return (
+    catLower.includes("dojin") ||
+    catLower.includes("โดจิน") ||
+    catLower.includes("ntr") ||
+    catLower.includes("18+")
+  );
+}

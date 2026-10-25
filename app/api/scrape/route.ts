@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
+import { isSafeExternalUrl, safeDecodeURIComponent } from "@/lib/ssrf";
 
 // Helper to extract a friendly site name from URL
 function getSiteNameFromUrl(urlString: string): string {
@@ -42,7 +43,7 @@ function extractChapterFromText(text: string): number | undefined {
 function extractChapterFromUrl(urlString: string): number | undefined {
   try {
     const parsed = new URL(urlString);
-    const path = decodeURIComponent(parsed.pathname);
+    const path = safeDecodeURIComponent(parsed.pathname);
 
     // If path is like /cartoon/book/714/read/25347, 25347 is an internal chapter ID, NOT chapter number
     if (/(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(path)) {
@@ -125,12 +126,15 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
 
     // 1. Identify non-manga domains (Google, Shopee, government sites, social media, app domain)
     const JUNK_DOMAINS = [
-      "google.",
-      "shopee.",
-      "lazada.",
+      "google.com",
+      "google.co.th",
+      "shopee.co.th",
+      "shopee.com",
+      "lazada.co.th",
+      "lazada.com",
       "cad.go.th",
       "mdes.go.th",
-      "smart4m",
+      "smart4m.com",
       "facebook.com",
       "instagram.com",
       "twitter.com",
@@ -140,7 +144,8 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
       "youtu.be",
       "vercel.app",
     ];
-    if (JUNK_DOMAINS.some((d) => parsed.hostname.toLowerCase().includes(d))) {
+    const host = parsed.hostname.toLowerCase();
+    if (JUNK_DOMAINS.some((d) => host === d || host.endsWith("." + d))) {
       return { title: "", isJunk: true };
     }
 
@@ -165,9 +170,7 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
     let rawSlug = meaningfulSegments.pop() || segments.pop() || "";
     if (!rawSlug) return { title: "", isJunk: false };
 
-    try {
-      rawSlug = decodeURIComponent(rawSlug);
-    } catch {}
+    rawSlug = safeDecodeURIComponent(rawSlug);
 
     // Reject hex hashes (e.g. f6d7407c349bfea9ac8c4094febea095) or Firestore document IDs
     if (
@@ -244,7 +247,7 @@ function findSeriesUrlFromHtml(html: string, currentUrl: string): string | null 
 function deriveSeriesUrl(urlStr: string): string | null {
   try {
     const u = new URL(urlStr);
-    let pathname = decodeURIComponent(u.pathname).replace(/\/+$/, "");
+    let pathname = safeDecodeURIComponent(u.pathname).replace(/\/+$/, "");
     pathname = pathname.replace(/^\/?\d+[-_]/, "/");
     const cleanPath = pathname
       .replace(/[-_](?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+(?:\.\d+)?$/i, "")
@@ -269,8 +272,17 @@ function deriveSeriesUrl(urlStr: string): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { url, providedTitle } = body;
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON body" },
+        { status: 400 }
+      );
+    }
+
+    const { url, providedTitle } = body || {};
 
     if (!url || typeof url !== "string") {
       return NextResponse.json(
@@ -279,15 +291,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(url.trim());
-    } catch {
+    if (!isSafeExternalUrl(url.trim())) {
       return NextResponse.json(
-        { success: false, error: "รูปแบบ URL ไม่ถูกต้อง" },
+        { success: false, error: "รูปแบบ URL ไม่ถูกต้องหรือไม่อนุญาต" },
         { status: 400 }
       );
     }
+
+    const parsedUrl = new URL(url.trim());
 
     const siteName = getSiteNameFromUrl(parsedUrl.href);
     let detectedChapter = extractChapterFromUrl(parsedUrl.href);
@@ -321,7 +332,7 @@ export async function POST(req: NextRequest) {
         signal: AbortSignal.timeout(8000),
       });
 
-      if (response.ok) {
+      if (response.ok && (!response.url || isSafeExternalUrl(response.url))) {
         const html = await response.text();
         const $ = cheerio.load(html);
 

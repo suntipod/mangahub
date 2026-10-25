@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isSafeExternalUrl } from "@/lib/ssrf";
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -7,15 +8,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing image url" }, { status: 400 });
   }
 
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      return NextResponse.json({ error: "Invalid protocol" }, { status: 400 });
-    }
-  } catch {
-    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+  if (!isSafeExternalUrl(url)) {
+    return NextResponse.json({ error: "Invalid or unsafe URL" }, { status: 400 });
   }
+
+  const parsed = new URL(url.trim());
 
   try {
     const controller = new AbortController();
@@ -36,6 +33,10 @@ export async function GET(req: NextRequest) {
     });
     clearTimeout(timeout);
 
+    if (imageRes.url && !isSafeExternalUrl(imageRes.url)) {
+      return NextResponse.json({ error: "Unsafe redirect blocked" }, { status: 400 });
+    }
+
     if (!imageRes.ok) {
       return NextResponse.json(
         { error: `Upstream error: ${imageRes.status}` },
@@ -43,14 +44,23 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const contentType = imageRes.headers.get("content-type") || "image/jpeg";
+    const rawContentType = (imageRes.headers.get("content-type") || "").toLowerCase().trim();
+    if (!rawContentType.startsWith("image/")) {
+      return NextResponse.json(
+        { error: "Upstream resource is not a valid image" },
+        { status: 415 }
+      );
+    }
+
     const arrayBuffer = await imageRes.arrayBuffer();
 
     return new Response(arrayBuffer, {
       status: 200,
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": rawContentType,
         "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (error: any) {
