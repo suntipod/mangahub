@@ -5,12 +5,9 @@ import { Manga } from "@/types/manga";
 import { getReadLogs } from "@/lib/storage";
 import {
   Flame,
-  Sparkles,
-  TrendingUp,
   BarChart3,
   ChevronDown,
   ChevronUp,
-  BookOpen,
   Zap,
   ExternalLink,
   Award,
@@ -127,7 +124,6 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
   onOpenStats,
   onOpenReader,
   onTagClick,
-  onCategoryClick,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -172,7 +168,6 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
       }
     }
 
-    const activeMangasCount = activeMangaIdsFromLogs.size;
     const chaptersThisWeek = weekChaptersFromLogs;
     const chaptersToday = todayChaptersFromLogs;
     const totalChaptersRead = mangas.reduce((acc, m) => acc + (Number(m.current_chapter) || 0), 0);
@@ -213,9 +208,9 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
   if (!summary) return null;
 
   return (
-    <div className="relative overflow-hidden bg-gradient-to-r from-[#111A2E]/90 via-[#0F1626]/90 to-[#121B2B]/90 border border-violet-500/30 rounded-2xl sm:rounded-3xl shadow-xl transition-all duration-300 animate-fade-in mb-3">
+    <div className="relative overflow-hidden bg-gradient-to-r from-[#111A2E]/95 via-[#0F1626]/95 to-[#121B2B]/95 border border-violet-500/30 rounded-2xl sm:rounded-3xl shadow-xl transition-all duration-300 animate-fade-in mb-3 tabular-nums">
       {/* Top Banner Header Bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-[#0A0F1D]/70 border-b border-[#1E293B]">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-[#0A0F1D]/75 border-b border-[#1E293B]">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center text-white shadow-sm">
             <BarChart3 className="w-3.5 h-3.5" />
@@ -223,7 +218,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
           <span className="text-xs font-bold text-white flex items-center gap-1.5">
             <span>สรุปสถิติ & ประวัติการอ่าน (Reading Tracker)</span>
           </span>
-          <span className="text-[10px] font-semibold bg-violet-950/60 text-violet-300 border border-violet-800/40 px-2 py-0.5 rounded-full hidden sm:inline">
+          <span className="text-[10px] font-semibold bg-violet-950/70 text-violet-200 border border-violet-800/50 px-2 py-0.5 rounded-full hidden sm:inline">
             Realtime
           </span>
         </div>
@@ -231,13 +226,16 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={onOpenStats}
-            className="flex items-center gap-1 text-[11px] font-bold text-violet-300 hover:text-white bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/30 px-2.5 py-1 rounded-lg transition active:scale-95 shadow-sm"
+            className="flex items-center gap-1.5 text-[11px] font-bold text-violet-200 hover:text-white bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/30 px-2.5 py-1 rounded-lg transition active:scale-95 shadow-sm"
           >
-            <span>ดูสถิติฉบับเต็ม 📊</span>
+            <BarChart3 className="w-3.5 h-3.5 text-violet-300" />
+            <span>ดูสถิติฉบับเต็ม</span>
           </button>
           <button
             onClick={toggleExpanded}
-            className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-[#1E293B] transition"
+            aria-label={isExpanded ? "ย่อแถบสถิติ" : "ขยายแถบสถิติ"}
+            aria-expanded={isExpanded}
+            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-[#1E293B] transition"
             title={isExpanded ? "ย่อแถบสถิติ" : "ขยายแถบสถิติ"}
           >
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -251,7 +249,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
           {/* Card 1: สัปดาห์นี้อ่านไปแล้วกี่ตอน */}
           <div className="bg-[#0B1120] border border-[#1E293B] hover:border-orange-500/40 rounded-2xl p-3.5 flex flex-col justify-between transition group shadow-sm">
             <div className="flex items-center justify-between text-orange-400">
-              <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                 <Flame className="w-4 h-4 text-orange-400 fill-orange-400" />
                 <span>สัปดาห์นี้อ่านไปแล้ว</span>
               </span>
@@ -265,9 +263,9 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-300">
                   {summary.chaptersThisWeek}
                 </span>
-                <span className="text-xs font-bold text-gray-400">ตอน</span>
+                <span className="text-xs font-bold text-slate-300">ตอน</span>
               </div>
-              <p className="text-[11px] text-gray-400 mt-0.5">
+              <p className="text-[11px] text-slate-300 mt-0.5">
                 {summary.activeMangasThisWeek > 0
                   ? `เปิดอ่านไป ${summary.activeMangasThisWeek} เรื่อง • วันนี้ +${summary.chaptersToday} ตอน`
                   : `อ่านรวมทั้งหมด ${summary.totalChaptersRead.toLocaleString()} ตอน`}
@@ -285,14 +283,14 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
           {/* Card 2: เรื่องที่อัปเดตถี่ / มีตอนค้างมากสุด */}
           <div className="bg-[#0B1120] border border-[#1E293B] hover:border-cyan-500/40 rounded-2xl p-3.5 flex flex-col justify-between transition group shadow-sm">
             <div className="flex items-center justify-between text-cyan-400">
-              <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                 <Zap className="w-4 h-4 text-cyan-400 fill-cyan-400" />
                 <span>
                   {summary.mostUpdatedManga ? "อัปเดตมีตอนใหม่ค้างอยู่" : "เรื่องที่อ่านมากที่สุด"}
                 </span>
               </span>
               {summary.mostUpdatedBacklog > 0 && (
-                <span className="text-[10px] font-bold bg-cyan-950/60 text-cyan-300 border border-cyan-800/40 px-2 py-0.5 rounded-md animate-pulse">
+                <span className="text-[10px] font-bold bg-cyan-950/60 text-cyan-300 border border-cyan-800/40 px-2 py-0.5 rounded-md">
                   +{summary.mostUpdatedBacklog} ตอน
                 </span>
               )}
@@ -306,7 +304,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
                 >
                   {summary.mostUpdatedManga.title}
                 </h4>
-                <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-0.5">
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-300 mt-0.5">
                   <span className="text-cyan-300 font-semibold">
                     อ่านถึง ช.{summary.mostUpdatedManga.current_chapter}
                   </span>
@@ -326,13 +324,13 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="my-2 text-xs text-gray-500">ไม่มีข้อมูลการอัปเดต</div>
+              <div className="my-2 text-xs text-slate-400">ไม่มีข้อมูลการอัปเดต</div>
             )}
 
             {summary.mostUpdatedManga && onOpenReader && (
               <button
                 onClick={() => onOpenReader(summary.mostUpdatedManga!)}
-                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-700/40 text-cyan-300 rounded-xl text-xs font-bold transition active:scale-95"
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-700/40 text-cyan-200 rounded-xl text-xs font-bold transition active:scale-95"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>เปิดอ่านตอนค้างทันที</span>
@@ -343,7 +341,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
           {/* Card 3: หมวดหมู่ / แนวการ์ตูนที่อ่านเยอะที่สุด */}
           <div className="bg-[#0B1120] border border-[#1E293B] hover:border-violet-500/40 rounded-2xl p-3.5 flex flex-col justify-between transition group shadow-sm">
             <div className="flex items-center justify-between text-violet-400">
-              <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                 <Award className="w-4 h-4 text-violet-400" />
                 <span>แนวโปรดที่อ่านเยอะที่สุด</span>
               </span>
@@ -366,19 +364,18 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
 
             {/* Quick Filter Clickable Theme Badges */}
             <div className="flex flex-wrap gap-1 pt-1">
-              <span className="text-[10px] text-gray-500 self-center">แนวฮิต:</span>
+              <span className="text-[10px] text-slate-400 self-center">แนวฮิต:</span>
               {[summary.topTheme, ...summary.secondaryThemes].slice(0, 3).map((th) => (
                 <button
                   key={th.label}
                   type="button"
                   onClick={() => {
                     if (onTagClick) {
-                      // Extract clean tag text
                       const clean = th.label.split("/")[0].trim();
                       onTagClick(clean);
                     }
                   }}
-                  className="text-[10px] font-semibold bg-[#151F33] hover:bg-violet-600/80 text-violet-300 hover:text-white px-2 py-0.5 rounded-lg border border-violet-500/20 transition active:scale-95"
+                  className="text-[10px] font-semibold bg-[#151F33] hover:bg-violet-600/80 text-violet-200 hover:text-white px-2 py-0.5 rounded-lg border border-violet-500/20 transition active:scale-95"
                   title={`คลิกเพื่อกรองการ์ตูนแนว ${th.label}`}
                 >
                   {th.icon} {th.label.split("/")[0].trim()}
@@ -389,7 +386,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
         </div>
       ) : (
         /* Collapsed Compact Strip */
-        <div className="px-4 py-2 flex items-center justify-between text-xs text-gray-300 gap-3 flex-wrap">
+        <div className="px-4 py-2 flex items-center justify-between text-xs text-slate-200 gap-3 flex-wrap">
           <div className="flex items-center gap-4 flex-wrap">
             <span className="flex items-center gap-1.5">
               <Flame className="w-3.5 h-3.5 text-orange-400 fill-orange-400" />
@@ -402,7 +399,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
               <strong className="text-violet-300">{summary.topTheme.label}</strong>
             </span>
             {summary.mostUpdatedBacklog > 0 && (
-              <span className="flex items-center gap-1.5 text-cyan-300 font-bold animate-pulse">
+              <span className="flex items-center gap-1.5 text-cyan-300 font-bold">
                 <Zap className="w-3.5 h-3.5 fill-cyan-400 text-cyan-400" />
                 <span>มีตอนใหม่อ่านค้างอยู่ +{summary.mostUpdatedBacklog} ตอน</span>
               </span>
@@ -411,7 +408,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
 
           <button
             onClick={toggleExpanded}
-            className="text-[11px] text-violet-400 hover:text-violet-300 underline underline-offset-2 flex items-center gap-1"
+            className="text-[11px] text-violet-300 hover:text-violet-200 underline underline-offset-2 flex items-center gap-1"
           >
             <span>ขยายดูสรุป</span>
             <ChevronDown className="w-3.5 h-3.5" />

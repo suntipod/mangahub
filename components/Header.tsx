@@ -1,24 +1,41 @@
 "use client";
 
 import React from "react";
-import { BookOpen, RefreshCw, Settings, Plus, Wifi, Flame, Loader2, Eye, EyeOff, Database, Dices, BarChart3, Smartphone, X } from "lucide-react";
+import {
+  BookMarked,
+  Cloud,
+  RefreshCw,
+  Settings,
+  Plus,
+  Flame,
+  EyeOff,
+  Eye,
+  Database,
+  CheckCircle2,
+  WifiOff,
+  BarChart3,
+  Dices,
+  Smartphone,
+  Search,
+  X,
+} from "lucide-react";
 import { SupabaseConfig, CloudSyncStatus } from "@/types/manga";
 
 interface HeaderProps {
   supabaseConfig: SupabaseConfig;
-  syncStatus?: CloudSyncStatus;
+  syncStatus: CloudSyncStatus;
   mangasCount?: number;
   lastSyncedAt?: Date | null;
   isSyncing: boolean;
   onSync: () => void;
   onOpenSettings: () => void;
-  onOpenBackup?: () => void;
+  onOpenBackup: () => void;
   onOpenInstallPwa?: () => void;
-  onOpenStats?: () => void;
-  onOpenRandom?: () => void;
+  onOpenStats: () => void;
+  onOpenRandom: () => void;
   onOpenAdd: () => void;
   searchQuery: string;
-  onSearchChange: (q: string) => void;
+  onSearchChange: (val: string) => void;
   onCheckUpdates?: () => void;
   isCheckingUpdates?: boolean;
   checkProgress?: { current: number; total: number } | null;
@@ -28,8 +45,8 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   supabaseConfig,
-  syncStatus = "synced",
-  mangasCount,
+  syncStatus,
+  mangasCount = 0,
   lastSyncedAt,
   isSyncing,
   onSync,
@@ -42,256 +59,276 @@ export const Header: React.FC<HeaderProps> = ({
   searchQuery,
   onSearchChange,
   onCheckUpdates,
-  isCheckingUpdates,
-  checkProgress,
+  isCheckingUpdates = false,
+  checkProgress = null,
   isDiscreetMode = false,
   onToggleDiscreet,
 }) => {
+  // Format time for tooltip
+  const formattedSyncTime = lastSyncedAt
+    ? lastSyncedAt.toLocaleTimeString("th-TH", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "";
+
   return (
-    <header className="sticky top-0 z-30 bg-[#090D16]/95 backdrop-blur-md border-b border-[#1F2E45] px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] sm:px-6">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
-        {/* Brand / Title */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/20 shrink-0">
-            <BookOpen className="w-5 h-5 text-white" />
+    <header className="sticky top-0 z-30 backdrop-blur-xl bg-[#090D16]/90 border-b border-[#1E293B] pt-safe">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3">
+        <div className="flex items-center justify-between gap-2 sm:gap-3">
+          {/* Logo & Title */}
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-600/30 shrink-0">
+              <BookMarked className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-base sm:text-xl font-bold bg-gradient-to-r from-white via-violet-200 to-indigo-300 bg-clip-text text-transparent tracking-tight truncate">
+                  MangaHub
+                </h1>
+                {mangasCount > 0 && (
+                  <span
+                    className="px-1.5 py-0.5 text-[10px] font-extrabold rounded-md bg-violet-950/90 text-violet-300 border border-violet-700/50 shrink-0 tabular-nums"
+                    title={`มีการ์ตูนทั้งหมด ${mangasCount} เรื่องในชั้นหนังสือ`}
+                  >
+                    {mangasCount} เรื่อง
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 hidden sm:block">
+                สมุดบันทึกตอนการ์ตูน & ซิงค์ข้ามอุปกรณ์
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-1.5">
-              Manga<span className="text-violet-400">Hub</span>
-            </h1>
-            <div className="flex items-center gap-1.5 text-xs pt-0.5">
+
+          {/* Search Bar (Desktop) */}
+          <div className="hidden md:flex flex-1 max-w-md mx-4">
+            <div className="relative w-full">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="ค้นหาชื่อเรื่อง, ชื่อรอง, แท็ก หรือเว็บที่อ่าน..."
+                aria-label="ค้นหาการ์ตูน"
+                className="w-full bg-[#131B2E] border border-[#1E293B] focus:border-violet-500 rounded-xl pl-10 pr-9 py-2 text-sm text-gray-100 placeholder-slate-400 outline-none transition"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => onSearchChange("")}
+                  aria-label="ล้างคำค้นหา"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Discreet Mode Toggle (Blur 18+ Covers) */}
+            {onToggleDiscreet && (
               <button
-                type="button"
-                onClick={syncStatus === "disabled" ? onOpenSettings : onSync}
-                disabled={isSyncing}
-                title={
-                  syncStatus === "syncing"
-                    ? "กำลังซิงค์ข้อมูลกับ Cloud... (โปรดรอสักครู่ก่อนปิดแท็บ)"
-                    : syncStatus === "synced"
-                    ? `🟢 ข้อมูลในเครื่องกับ Supabase ตรงกันสมบูรณ์ (${mangasCount || 0} เรื่อง) ${
-                        lastSyncedAt
-                          ? `• ซิงค์ล่าสุด ${lastSyncedAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.`
-                          : ""
-                      } - คลิกเพื่อซิงค์ใหม่อีกครั้ง`
-                    : syncStatus === "offline"
-                    ? "🔴 ออฟไลน์ / ไม่สามารถเชื่อมต่อ Supabase ได้ (บันทึกในเครื่องเรียบร้อยแล้ว) - คลิกเพื่อลองใหม่"
-                    : `⚪ บันทึกในเครื่อง (${mangasCount || 0} เรื่อง) - คลิกเพื่อเปิดการตั้งค่า Supabase`
-                }
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition border active:scale-95 text-left ${
-                  syncStatus === "syncing"
-                    ? "bg-amber-950/40 border-amber-500/40 text-amber-300"
-                    : syncStatus === "synced"
-                    ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-300 hover:bg-emerald-900/40"
-                    : syncStatus === "offline"
-                    ? "bg-rose-950/50 border-rose-500/40 text-rose-300 hover:bg-rose-900/40"
-                    : "bg-[#131B2E] border-[#1F2E45] text-gray-400 hover:text-gray-300"
+                onClick={onToggleDiscreet}
+                aria-label={isDiscreetMode ? "ปิดโหมดซ่อนปก 18+" : "เปิดโหมดซ่อนปก 18+"}
+                aria-pressed={isDiscreetMode}
+                className={`flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition active:scale-95 ${
+                  isDiscreetMode
+                    ? "bg-rose-950/60 border-rose-700/60 text-rose-300 hover:bg-rose-900/60 shadow-lg shadow-rose-950/50"
+                    : "bg-[#131B2E] border-[#1E293B] text-slate-300 hover:text-white hover:bg-[#1E293B]"
                 }`}
+                title={
+                  isDiscreetMode
+                    ? "กำลังเปิดโหมดซ่อนปก 18+ (คลิกเพื่อแสดงรูปปกตามปกติ)"
+                    : "เปิดโหมดซ่อนปก 18+ (เบลอหน้าปกโดจิน/NTR เวลาอยู่นอกบ้าน)"
+                }
               >
-                {syncStatus === "syncing" ? (
+                {isDiscreetMode ? (
                   <>
-                    <Loader2 className="w-3 h-3 animate-spin text-amber-400 shrink-0" />
-                    <span className="text-[11px] font-semibold text-amber-300">Syncing...</span>
-                  </>
-                ) : syncStatus === "synced" ? (
-                  <>
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </span>
-                    <span className="text-[11px] font-bold text-emerald-300">Synced</span>
-                    {typeof mangasCount === "number" && (
-                      <span className="text-[10px] text-emerald-400/80 hidden sm:inline">
-                        ({mangasCount})
-                      </span>
-                    )}
-                  </>
-                ) : syncStatus === "offline" ? (
-                  <>
-                    <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0"></span>
-                    <span className="text-[11px] font-semibold text-rose-300">Offline</span>
+                    <EyeOff className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span className="hidden xl:inline">ซ่อนปก 18+</span>
                   </>
                 ) : (
                   <>
-                    <Wifi className="w-3 h-3 text-cyan-400 shrink-0" />
-                    <span className="text-[11px] text-gray-400">Local ({mangasCount || 0})</span>
+                    <Eye className="w-4 h-4 text-slate-300 shrink-0" />
+                    <span className="hidden xl:inline">ปกปกติ</span>
                   </>
                 )}
               </button>
-            </div>
+            )}
+
+            {/* Random Manga Picker Button */}
+            <button
+              onClick={onOpenRandom}
+              aria-label="สุ่มการ์ตูนอ่าน"
+              className="flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border bg-gradient-to-r from-amber-950/40 to-orange-950/40 border-amber-700/40 text-amber-300 hover:bg-amber-900/40 transition active:scale-95"
+              title="วันนี้อ่านเรื่องอะไรดี? สุ่มการ์ตูนจากชั้นหนังสือ"
+            >
+              <Dices className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="hidden lg:inline">สุ่มอ่าน</span>
+            </button>
+
+            {/* Reading Stats Dashboard Button */}
+            <button
+              onClick={onOpenStats}
+              aria-label="สถิติการอ่านส่วนตัว"
+              className="hidden sm:flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border bg-[#131B2E] border-[#1E293B] text-violet-300 hover:text-white hover:bg-[#1E293B] transition active:scale-95"
+              title="ดูสถิติการอ่านส่วนตัวของคุณ (Reading Stats)"
+            >
+              <BarChart3 className="w-4 h-4 text-violet-400 shrink-0" />
+              <span className="hidden lg:inline">สถิติ</span>
+            </button>
+
+            {/* Check Online Chapter Updates Button */}
+            {onCheckUpdates && (
+              <button
+                onClick={onCheckUpdates}
+                disabled={isCheckingUpdates}
+                aria-label="ตรวจหาตอนใหม่จากเว็บ"
+                className={`flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition active:scale-95 tabular-nums ${
+                  isCheckingUpdates
+                    ? "bg-orange-950/50 border-orange-700/60 text-orange-300 cursor-wait"
+                    : "bg-orange-950/30 border-orange-800/50 text-orange-300 hover:bg-orange-900/40"
+                }`}
+                title="ตรวจสอบตอนใหม่ล่าสุดจากหน้าเว็บทุกเรื่อง"
+              >
+                <Flame
+                  className={`w-4 h-4 text-orange-400 shrink-0 ${
+                    isCheckingUpdates ? "animate-bounce" : ""
+                  }`}
+                />
+                <span className="hidden lg:inline">
+                  {isCheckingUpdates && checkProgress
+                    ? `เช็กตอนใหม่ (${checkProgress.current}/${checkProgress.total})`
+                    : "เช็กตอนใหม่"}
+                </span>
+              </button>
+            )}
+
+            {/* Cloud Sync Status Badge */}
+            <button
+              onClick={supabaseConfig.enabled ? onSync : onOpenSettings}
+              disabled={isSyncing || syncStatus === "syncing"}
+              aria-label="สถานะการซิงค์ข้อมูล Cloud"
+              className={`flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition active:scale-95 ${
+                !supabaseConfig.enabled || syncStatus === "disabled"
+                  ? "bg-[#131B2E] border-[#1E293B] text-slate-300 hover:text-gray-100"
+                  : syncStatus === "syncing" || isSyncing
+                  ? "bg-amber-950/40 border-amber-700/50 text-amber-300 animate-pulse"
+                  : syncStatus === "offline"
+                  ? "bg-rose-950/50 border-rose-700/60 text-rose-300 hover:bg-rose-900/50"
+                  : "bg-emerald-950/40 border-emerald-800/50 text-emerald-300 hover:bg-emerald-900/40"
+              }`}
+              title={
+                !supabaseConfig.enabled || syncStatus === "disabled"
+                  ? "คลิกเพื่อตั้งค่าการซิงค์ข้อมูลข้ามอุปกรณ์ (Supabase Cloud)"
+                  : syncStatus === "syncing" || isSyncing
+                  ? "🟡 กำลังซิงค์ข้อมูลกับ Supabase Cloud..."
+                  : syncStatus === "offline"
+                  ? "🔴 ออฟไลน์ / ซิงค์ไม่สำเร็จ (คลิกเพื่อลองซิงค์ใหม่)"
+                  : `🟢 ข้อมูลตรงกับ Cloud สมบูรณ์แล้ว${
+                      formattedSyncTime ? ` (อัปเดตล่าสุด ${formattedSyncTime})` : ""
+                    } - คลิกเพื่อซิงค์ใหม่`
+              }
+            >
+              {!supabaseConfig.enabled || syncStatus === "disabled" ? (
+                <>
+                  <Cloud className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="hidden md:inline">ตั้งค่าซิงค์</span>
+                </>
+              ) : syncStatus === "syncing" || isSyncing ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                  <span className="hidden sm:inline">กำลังซิงค์...</span>
+                </>
+              ) : syncStatus === "offline" ? (
+                <>
+                  <WifiOff className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span className="hidden sm:inline">ออฟไลน์</span>
+                </>
+              ) : (
+                <>
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 hidden sm:inline shrink-0" />
+                  <span className="hidden sm:inline">ซิงค์แล้ว</span>
+                </>
+              )}
+            </button>
+
+            {/* Add / Rescue Tab Button */}
+            <button
+              onClick={onOpenAdd}
+              aria-label="กู้ชีพแท็บหรือเพิ่มการ์ตูนใหม่"
+              className="hidden sm:flex items-center gap-1.5 min-h-[40px] bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow-lg shadow-violet-600/25 transition active:scale-95"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span>กู้ชีพแท็บ / เพิ่มเรื่อง</span>
+            </button>
+
+            {/* Install App on iPhone / Mobile PWA Button */}
+            {onOpenInstallPwa && (
+              <button
+                onClick={onOpenInstallPwa}
+                aria-label="ติดตั้งแอปลงหน้าจอมือถือ"
+                className="flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-700/50 text-indigo-300 text-xs font-bold transition active:scale-95"
+                title="วิธีติดตั้งแอป MangaHub ลงหน้าจอโฮม iPhone / Android"
+              >
+                <Smartphone className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span className="hidden xl:inline">ติดตั้งแอป</span>
+              </button>
+            )}
+
+            {/* Quick Backup & Restore JSON / CSV Button */}
+            <button
+              onClick={onOpenBackup}
+              aria-label="สำรองข้อมูลและกู้คืนไฟล์"
+              className="flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/50 text-emerald-300 text-xs font-bold transition active:scale-95"
+              title="สำรองข้อมูลลงแฟลชไดรฟ์ / กู้คืนไฟล์ Backup JSON & Excel CSV"
+            >
+              <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="hidden xl:inline">สำรองข้อมูล</span>
+            </button>
+
+            {/* Settings Button */}
+            <button
+              onClick={onOpenSettings}
+              aria-label="ตั้งค่าระบบและหมวดหมู่"
+              className="flex items-center justify-center min-w-[40px] min-h-[40px] p-2 rounded-xl bg-[#131B2E] hover:bg-[#1E293B] border border-[#1E293B] text-slate-300 hover:text-white transition active:scale-95"
+              title="ตั้งค่าระบบ & จัดการหมวดหมู่"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        {/* Search input (Hidden on small screens) */}
-        <div className="relative flex-1 max-w-md hidden sm:block">
-          <input
-            type="text"
-            placeholder="ค้นหาชื่อการ์ตูน..."
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-xl pl-4 pr-9 py-2 text-sm text-gray-200 placeholder-gray-500 outline-none transition"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => onSearchChange("")}
-              title="ล้างคำค้นหา"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:text-white hover:bg-[#1F2E45]/60 transition"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+        {/* Search Bar (Mobile) — uses text-base (16px) to prevent iOS Safari auto-zoom on focus */}
+        <div className="mt-2.5 md:hidden">
+          <div className="relative w-full">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="ค้นหาชื่อเรื่อง, แท็ก หรือเว็บอ่าน..."
+              aria-label="ค้นหาการ์ตูน"
+              className="w-full bg-[#131B2E] border border-[#1E293B] focus:border-violet-500 rounded-xl pl-10 pr-9 py-2 text-base text-gray-100 placeholder-slate-400 outline-none transition"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => onSearchChange("")}
+                aria-label="ล้างคำค้นหา"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Check Updates Button */}
-          {onCheckUpdates && (
-            <button
-              onClick={onCheckUpdates}
-              disabled={isCheckingUpdates}
-              title="ตรวจหาตอนใหม่จากเว็บทั้งหมด"
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold transition shadow-sm ${
-                isCheckingUpdates
-                  ? "bg-orange-500/20 text-orange-400 border border-orange-500/30 cursor-not-allowed"
-                  : "bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white shadow-orange-500/20 active:scale-95"
-              }`}
-            >
-              {isCheckingUpdates ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Flame className="w-3.5 h-3.5" />
-              )}
-              <span className="hidden md:inline">
-                {isCheckingUpdates && checkProgress
-                  ? `ตรวจ ${checkProgress.current}/${checkProgress.total}`
-                  : "ตรวจหาตอนใหม่"}
-              </span>
-            </button>
-          )}
-
-          {/* Discreet 18+ Blur Toggle Button */}
-          {onToggleDiscreet && (
-            <button
-              onClick={onToggleDiscreet}
-              title={
-                isDiscreetMode
-                  ? "โหมดเซฟตี้ 18+ (เปิดเบลอปกอยู่) - คลิกเพื่อปิด"
-                  : "โหมดเซฟตี้ 18+ (ปิดอยู่) - คลิกเพื่อเปิดเบลอปก Dojin/NTR เมื่ออยู่นอกบ้าน"
-              }
-              className={`flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition shadow-sm active:scale-95 ${
-                isDiscreetMode
-                  ? "bg-rose-950/60 text-rose-300 border border-rose-500/60 shadow-rose-950/50"
-                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
-              }`}
-            >
-              {isDiscreetMode ? (
-                <>
-                  <EyeOff className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span className="hidden lg:inline text-[11px] text-rose-300">เบลอ 18+ [ON]</span>
-                </>
-              ) : (
-                <>
-                  <Eye className="w-4 h-4 text-gray-400 shrink-0" />
-                  <span className="hidden lg:inline text-[11px]">เบลอ 18+</span>
-                </>
-              )}
-            </button>
-          )}
-
-          {/* Manual Refresh / Sync Button */}
-          <button
-            onClick={onSync}
-            disabled={isSyncing}
-            title="รีเฟรช / ซิงค์ข้อมูล"
-            className={`p-2 sm:p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-gray-300 transition ${
-              isSyncing ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-          >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin text-violet-400" : ""}`} />
-          </button>
-
-          <button
-            onClick={onOpenAdd}
-            className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-medium text-sm shadow-md shadow-violet-600/30 transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>กู้ชีพแท็บ Safari</span>
-          </button>
-
-          {/* Random Picker Button (วันนี้อ่านอะไรดี? 🎲) - Hidden on mobile since BottomNav has it */}
-          {onOpenRandom && (
-            <button
-              onClick={onOpenRandom}
-              title="วันนี้อ่านเรื่องอะไรดี? (สุ่มการ์ตูนเด็ดมาให้อ่าน 🎲)"
-              className="hidden sm:flex p-2.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 border border-amber-500/40 text-amber-300 hover:text-amber-200 transition active:scale-95"
-            >
-              <Dices className="w-4 h-4" />
-            </button>
-          )}
-
-          {/* Reading Stats Button (สถิติการอ่าน 📊) - Hidden on mobile since BottomNav has it */}
-          {onOpenStats && (
-            <button
-              onClick={onOpenStats}
-              title="สถิติการอ่านส่วนตัว (Reading Stats 📊)"
-              className="hidden sm:flex p-2.5 rounded-xl bg-violet-950/40 hover:bg-violet-900/50 border border-violet-500/40 text-violet-300 hover:text-violet-200 transition active:scale-95"
-            >
-              <BarChart3 className="w-4 h-4" />
-            </button>
-          )}
-
-          {/* Backup & Restore JSON Button */}
-          {onOpenBackup && (
-            <button
-              onClick={onOpenBackup}
-              title="สำรองและกู้คืนข้อมูล (Backup & Restore JSON / Excel CSV)"
-              className="hidden sm:flex p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-emerald-400 hover:text-emerald-300 transition"
-            >
-              <Database className="w-4 h-4" />
-            </button>
-          )}
-
-          {/* Install PWA Mobile App Button */}
-          {onOpenInstallPwa && (
-            <button
-              onClick={onOpenInstallPwa}
-              title="วิธีติดตั้งลงมือถือ / เปิดใช้งานเต็มจอ (PWA App)"
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-violet-600/30 to-indigo-600/30 hover:from-violet-600/50 hover:to-indigo-600/50 border border-violet-500/40 text-violet-200 transition active:scale-95"
-            >
-              <Smartphone className="w-4 h-4 text-violet-400 shrink-0" />
-              <span className="hidden lg:inline text-[11px]">ติดตั้งแอป</span>
-            </button>
-          )}
-
-          <button
-            onClick={onOpenSettings}
-            title="ตั้งค่าระบบ / Supabase"
-            className="hidden sm:flex p-2.5 rounded-xl bg-[#131B2E] hover:bg-[#1C2940] border border-[#1F2E45] text-gray-300 transition"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile Search input */}
-      <div className="relative mt-2.5 sm:hidden">
-        <input
-          type="text"
-          placeholder="ค้นหาชื่อการ์ตูน..."
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full bg-[#131B2E] border border-[#1F2E45] focus:border-violet-500 rounded-xl pl-3.5 pr-9 py-2 text-sm text-gray-200 placeholder-gray-500 outline-none transition"
-        />
-        {searchQuery && (
-          <button
-            type="button"
-            onClick={() => onSearchChange("")}
-            title="ล้างคำค้นหา"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:text-white hover:bg-[#1F2E45]/60 transition"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
       </div>
     </header>
   );

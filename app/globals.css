@@ -5,53 +5,122 @@
 :root {
   --background: #090d16;
   --foreground: #f3f4f6;
+  --surface-primary: #111827;
+  --surface-elevated: #131b2e;
+  --border-subtle: #1f2e45;
+  --accent-primary: #7c3aed;
+  --accent-glow: #a78bfa;
+  color-scheme: dark;
+}
+
+html {
+  background-color: var(--background);
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  min-height: 100vh;
-  /* Support iPhone safe area */
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Thai", sans-serif;
+  overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
-  user-select: none;
+  text-rendering: optimizeLegibility;
 }
 
-input, textarea {
-  user-select: text;
+/* Custom Selection & Caret (Impeccable Browser Surfaces) */
+::selection {
+  background-color: rgba(124, 58, 237, 0.38);
+  color: #ffffff;
 }
 
-/* Custom dark scrollbar */
+input,
+textarea,
+select {
+  caret-color: var(--accent-glow);
+}
+
+/* Accessible Focus Ring for Keyboard Navigation */
+:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: 2px;
+}
+
+/* Eliminate 300ms tap delay on mobile buttons & controls */
+button,
+a,
+select,
+input,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+/* Tabular numerals utility for chapter numbers, stats, and counters */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom Scrollbar for dark mode */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0b0f19;
+  background: #090d16;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1f2e45;
+  background: #1e293b;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3d5d;
+  background: #475569;
+}
+
+/* Utility to hide scrollbars cleanly on horizontal pill bars */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Safe area padding for iPhone Home Indicator & Dynamic Island */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: scale(0.97);
+    transform: translateY(4px) scale(0.99);
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: translateY(0) scale(1);
   }
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.15s ease-out forwards;
+  animation: fadeIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Respect user Reduced Motion preferences (Impeccable & UI/UX Pro Max) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

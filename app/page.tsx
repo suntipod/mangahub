@@ -44,12 +44,10 @@ import {
   BookOpen,
   Plus,
   Sparkles,
-  ArrowUpDown,
   BookmarkCheck,
   Clock,
   CheckCircle2,
   Flame,
-  Check,
   LayoutGrid,
   StretchHorizontal,
   Zap,
@@ -59,6 +57,7 @@ import {
   BarChart3,
   Loader2,
   Database,
+  RotateCcw,
 } from "lucide-react";
 
 export default function Home() {
@@ -128,6 +127,22 @@ export default function Home() {
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isRandomOpen, setIsRandomOpen] = useState(false);
+
+  // Close active modal on Escape key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (selectedManga) setSelectedManga(null);
+        else if (isAddOpen) setIsAddOpen(false);
+        else if (isSettingsOpen) setIsSettingsOpen(false);
+        else if (isBackupOpen) setIsBackupOpen(false);
+        else if (isStatsOpen) setIsStatsOpen(false);
+        else if (isRandomOpen) setIsRandomOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedManga, isAddOpen, isSettingsOpen, isBackupOpen, isStatsOpen, isRandomOpen]);
 
   // Cloud Sync state
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>("syncing");
@@ -307,7 +322,6 @@ export default function Home() {
       setIsSyncing(false);
     }
   };
-
 
   // Check online updates for all mangas with linked sources
   const handleCheckAllUpdates = async () => {
@@ -506,7 +520,6 @@ export default function Home() {
     }
   };
 
-
   // Find the most recently read manga
   const recentlyReadManga = useMemo(() => {
     if (mangas.length === 0) return null;
@@ -641,6 +654,21 @@ export default function Home() {
     return counts;
   }, [categoryScopedMangas]);
 
+  const hasActiveFilters =
+    Boolean(searchQuery.trim()) ||
+    Boolean(selectedTag) ||
+    selectedCategory !== "all" ||
+    selectedTier !== "all" ||
+    currentTab !== "all";
+
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setSelectedTag(null);
+    setSelectedCategory("all");
+    setSelectedTier("all");
+    setCurrentTab("all");
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#090D16] text-gray-100 pb-24 sm:pb-12">
       {/* Header */}
@@ -675,7 +703,7 @@ export default function Home() {
             {updatesCount > 0 && currentTab !== "has_update" && (
               <button
                 onClick={() => setCurrentTab("has_update")}
-                className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-[11px] px-3 py-1 rounded-xl transition shadow"
+                className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-[11px] px-3 py-1 rounded-xl transition shadow tabular-nums"
               >
                 ดูเรื่องที่มีตอนใหม่ ({updatesCount})
               </button>
@@ -690,13 +718,13 @@ export default function Home() {
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
+              <h2 className="text-sm font-bold text-white flex items-center gap-1.5 flex-wrap">
                 <span>มีแท็บเปิดค้างใน iPhone เยอะใช่ไหม?</span>
-                <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded-full font-semibold border border-violet-500/30">
+                <span className="text-[10px] bg-violet-500/20 text-violet-200 px-2 py-0.5 rounded-full font-semibold border border-violet-500/30">
                   แก้ปัญหาแท็บหาย
                 </span>
               </h2>
-              <p className="text-xs text-gray-400 mt-0.5">
+              <p className="text-xs text-slate-300 mt-0.5">
                 ก๊อปปี้ลิงก์หน้าเว็บที่เปิดค้างไว้มาแปะ ระบบจะดึงรูปปกและชื่อเรื่องให้ทันที จากนั้นปิดแท็บใน Safari ทิ้งได้เลย!
               </p>
             </div>
@@ -707,10 +735,10 @@ export default function Home() {
             <button
               onClick={() => setIsRandomOpen(true)}
               className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
-              title="สุ่มการ์ตูน Tier S/A ที่ดองไว้มาให้อ่าน 🎲"
+              title="สุ่มการ์ตูน Tier S/A ที่ดองไว้มาให้อ่าน"
             >
               <Dices className="w-4 h-4 text-amber-400" />
-              <span>สุ่มอ่าน 🎲</span>
+              <span>สุ่มอ่าน</span>
             </button>
 
             {/* Reading Stats Button */}
@@ -720,7 +748,7 @@ export default function Home() {
               title="ดูสถิติการอ่านส่วนตัวของคุณ"
             >
               <BarChart3 className="w-4 h-4 text-violet-400" />
-              <span>สถิติ 📊</span>
+              <span>สถิติ</span>
             </button>
 
             {/* Backup & Export / Import Button */}
@@ -730,13 +758,13 @@ export default function Home() {
               title="สำรองข้อมูล / กู้คืน / ดาวน์โหลด Excel CSV และ JSON"
             >
               <Database className="w-4 h-4 text-emerald-400" />
-              <span>สำรองข้อมูล 💾</span>
+              <span>สำรองข้อมูล</span>
             </button>
 
             <button
               onClick={handleCheckAllUpdates}
               disabled={isCheckingUpdates}
-              className="flex items-center justify-center gap-1.5 bg-[#182338] hover:bg-[#20304c] text-orange-300 border border-orange-500/30 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              className="flex items-center justify-center gap-1.5 bg-[#182338] hover:bg-[#20304c] text-orange-300 border border-orange-500/30 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0 tabular-nums"
               title="ตรวจสอบตอนใหม่ล่าสุดจากเว็บทั้งหมด"
             >
               <Flame className={`w-4 h-4 ${isCheckingUpdates ? "animate-pulse text-orange-400" : ""}`} />
@@ -751,10 +779,10 @@ export default function Home() {
             {updatesCount > 0 && (
               <button
                 onClick={() => setCurrentTab(currentTab === "has_update" ? "all" : "has_update")}
-                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold transition active:scale-95 shadow-lg shrink-0 ${
+                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold transition active:scale-95 shadow-lg shrink-0 tabular-nums ${
                   currentTab === "has_update"
                     ? "bg-gradient-to-r from-orange-500 to-rose-600 text-white ring-2 ring-orange-400 shadow-orange-500/40"
-                    : "bg-orange-950/40 hover:bg-orange-900/50 text-orange-300 border border-orange-600/50 animate-pulse shadow-orange-950/30"
+                    : "bg-orange-950/40 hover:bg-orange-900/50 text-orange-300 border border-orange-600/50 shadow-orange-950/30"
                 }`}
                 title="คลิกเพื่อกรองดูเฉพาะเรื่องที่มีตอนใหม่อ่านค้างอยู่ (เรียงตามตอนที่ดองไว้มากสุด)"
               >
@@ -771,7 +799,7 @@ export default function Home() {
             <button
               onClick={handleAutoFixAllCovers}
               disabled={isFixingAllCovers}
-              className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 hover:from-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0"
+              className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 hover:from-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold px-3 py-2.5 rounded-xl shadow transition active:scale-95 shrink-0 tabular-nums"
               title="ดึงรูปปก HD สวยๆ จากเน็ตมาใส่ให้ทุกเรื่องที่ไม่มีรูปปก หรือภาพปกไม่ชัด"
             >
               {isFixingAllCovers ? (
@@ -782,7 +810,7 @@ export default function Home() {
               <span>
                 {isFixingAllCovers && fixCoverProgress
                   ? `ดึงปก ${fixCoverProgress.current}/${fixCoverProgress.total}...`
-                  : "🎨 ดึงรูปปก HD"}
+                  : "ดึงรูปปก HD"}
               </span>
             </button>
 
@@ -798,12 +826,12 @@ export default function Home() {
 
         {/* Recently Read Manga (Continue Reading Quick Hero) */}
         {recentlyReadManga && (
-          <div className="relative overflow-hidden bg-gradient-to-r from-violet-950/40 via-[#131B2E] to-[#101726] border border-violet-500/40 rounded-2xl p-3.5 sm:p-4 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-3.5 animate-fade-in">
+          <div className="relative overflow-hidden bg-gradient-to-r from-violet-950/40 via-[#131B2E] to-[#101726] border border-violet-500/40 rounded-2xl p-3.5 sm:p-4 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-3.5 animate-fade-in tabular-nums">
             {/* Left side: Cover & Manga Info */}
             <div className="flex items-center gap-3 w-full sm:w-auto min-w-0">
               <div
                 onClick={() => setSelectedManga(recentlyReadManga)}
-                className="relative w-14 sm:w-16 aspect-[2/3] rounded-xl overflow-hidden bg-[#0A0E17] border border-violet-500/50 shrink-0 cursor-pointer shadow-md group"
+                className="relative w-14 sm:w-16 aspect-[2/3] rounded-xl overflow-hidden bg-[#0A0E17] border border-violet-500/50 hover:border-violet-400 shrink-0 cursor-pointer shadow-md transition"
                 title="คลิกดูรายละเอียดเรื่อง"
               >
                 {recentlyReadManga.cover_url ? (
@@ -818,7 +846,7 @@ export default function Home() {
                         img.src = `/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
                       }
                     }}
-                    className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
+                    className={`w-full h-full object-cover ${
                       isDiscreetMode && isAdultCategory(recentlyReadManga.category)
                         ? "blur-md"
                         : ""
@@ -833,7 +861,7 @@ export default function Home() {
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                  <span className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm animate-pulse">
+                  <span className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
                     <BookOpen className="w-3 h-3" />
                     <span>กำลังอ่านอยู่ล่าสุด</span>
                   </span>
@@ -859,7 +887,7 @@ export default function Home() {
                     </span>
                   )}
                   {recentlyReadManga.category && (
-                    <span className="text-[10px] bg-[#1a253d] border border-[#2d3e61] text-gray-300 px-1.5 py-0.5 rounded-md font-medium">
+                    <span className="text-[10px] bg-[#1a253d] border border-[#2d3e61] text-slate-200 px-1.5 py-0.5 rounded-md font-medium">
                       {recentlyReadManga.category}
                     </span>
                   )}
@@ -873,18 +901,18 @@ export default function Home() {
                   {recentlyReadManga.title}
                 </h3>
 
-                <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5">
+                <div className="flex items-center gap-2 text-xs text-slate-300 mt-0.5 flex-wrap">
                   <span className="text-violet-300 font-bold">
                     อ่านถึงตอนที่ {recentlyReadManga.current_chapter}
                   </span>
                   {recentlyReadManga.latest_available_chapter ? (
-                    <span className="text-gray-400">
+                    <span className="text-slate-300">
                       / ล่าสุดในเว็บ {recentlyReadManga.latest_available_chapter}
                     </span>
                   ) : null}
                   {recentlyReadManga.latest_available_chapter &&
                     recentlyReadManga.latest_available_chapter > recentlyReadManga.current_chapter && (
-                      <span className="text-orange-400 font-extrabold flex items-center gap-0.5 text-[11px] animate-pulse">
+                      <span className="text-orange-400 font-extrabold flex items-center gap-0.5 text-[11px]">
                         <Flame className="w-3 h-3 fill-current" />
                         มีตอนใหม่!
                       </span>
@@ -906,7 +934,7 @@ export default function Home() {
             <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end flex-wrap">
               <button
                 onClick={() => handleIncrementChapter(recentlyReadManga.id)}
-                className="px-3 py-2 bg-[#182338] hover:bg-[#223250] text-gray-200 border border-[#27385a] rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1 shrink-0"
+                className="min-h-[38px] px-3 py-2 bg-[#182338] hover:bg-[#223250] text-slate-100 border border-[#27385a] rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1 shrink-0"
                 title="เพิ่มเลขตอนที่อ่าน +1 ตอน (ไม่ออกไปหน้าเว็บ)"
               >
                 <Plus className="w-3.5 h-3.5 text-violet-400" />
@@ -915,7 +943,7 @@ export default function Home() {
 
               <button
                 onClick={() => handleOpenReader(recentlyReadManga)}
-                className="px-3.5 py-2 bg-[#182338] hover:bg-[#223250] text-gray-200 border border-[#27385a] rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1.5 shrink-0"
+                className="min-h-[38px] px-3.5 py-2 bg-[#182338] hover:bg-[#223250] text-slate-100 border border-[#27385a] rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1.5 shrink-0"
                 title={`อ่านตอนปัจจุบัน (ตอนที่ ${recentlyReadManga.current_chapter})`}
               >
                 <BookOpen className="w-3.5 h-3.5 text-violet-400" />
@@ -924,11 +952,11 @@ export default function Home() {
 
               <button
                 onClick={() => handleIncrementAndOpenNext(recentlyReadManga)}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-emerald-600/30 transition active:scale-95"
+                className="min-h-[38px] flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-emerald-600/30 transition active:scale-95"
                 title={`อ่านตอนถัดไป: อัปเดตเป็นตอนที่ ${recentlyReadManga.current_chapter + 1} และเปิดหน้าเว็บทันที`}
               >
                 <Zap className="w-4 h-4 fill-current text-amber-300" />
-                <span>อ่านตอนที่ {recentlyReadManga.current_chapter + 1} 🚀</span>
+                <span>อ่านตอนที่ {recentlyReadManga.current_chapter + 1}</span>
               </button>
             </div>
           </div>
@@ -944,19 +972,19 @@ export default function Home() {
         />
 
         {/* Category & Tier Filter Toolbar */}
-        <div className="space-y-2.5 pt-1">
+        <div className="space-y-2.5 pt-1 tabular-nums">
           {/* Category Filter Bar */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
             <button
               onClick={() => setSelectedCategory("all")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+              className={`min-h-[34px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                 selectedCategory === "all"
                   ? "bg-violet-600 text-white shadow-md shadow-violet-600/30"
-                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+                  : "bg-[#131B2E] text-slate-300 hover:text-white border border-[#1F2E45]"
               }`}
             >
               <span>🗂️ ทุกหมวดหมู่</span>
-              <span className="text-[10px] opacity-75">({mangas.length})</span>
+              <span className="text-[10px] opacity-80">({mangas.length})</span>
             </button>
 
             {availableCategories.map((cat) => {
@@ -969,7 +997,7 @@ export default function Home() {
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                  className={`min-h-[34px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                     isSelected
                       ? isDojin
                         ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
@@ -980,14 +1008,14 @@ export default function Home() {
                       ? "bg-rose-950/30 text-rose-300 hover:bg-rose-950/50 border border-rose-800/40"
                       : isNTR
                       ? "bg-purple-950/30 text-purple-300 hover:bg-purple-950/50 border border-purple-800/40"
-                      : "bg-[#131B2E] text-gray-300 hover:text-white border border-[#1F2E45]"
+                      : "bg-[#131B2E] text-slate-300 hover:text-white border border-[#1F2E45]"
                   }`}
                 >
                   <span>
                     {isDojin ? "🔞 " : isNTR ? "💔 " : "📚 "}
                     {cat}
                   </span>
-                  <span className="text-[10px] opacity-75">({count})</span>
+                  <span className="text-[10px] opacity-80">({count})</span>
                 </button>
               );
             })}
@@ -995,87 +1023,87 @@ export default function Home() {
 
           {/* Tier Filter Bar */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-            <span className="text-[11px] font-bold text-gray-400 shrink-0 mr-1 flex items-center gap-1">
+            <span className="text-[11px] font-bold text-slate-300 shrink-0 mr-1 flex items-center gap-1">
               <span>🏆 Tier:</span>
             </span>
 
             <button
               onClick={() => setSelectedTier("all")}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1 ${
+              className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1 ${
                 selectedTier === "all"
                   ? "bg-gray-200 text-gray-900 shadow-md font-extrabold"
-                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+                  : "bg-[#131B2E] text-slate-300 hover:text-white border border-[#1F2E45]"
               }`}
             >
               <span>⭐ ทั้งหมด</span>
-              <span className="text-[10px] opacity-75">({tierCounts.all})</span>
+              <span className="text-[10px] opacity-80">({tierCounts.all})</span>
             </button>
 
             <button
               onClick={() => setSelectedTier("S")}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+              className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                 selectedTier === "S"
                   ? "bg-amber-400 text-black shadow-md shadow-amber-400/30 font-black"
                   : "bg-amber-950/20 text-amber-300 hover:bg-amber-950/40 border border-amber-600/40"
               }`}
             >
               <span>👑 Tier S</span>
-              <span className="text-[10px] opacity-80">({tierCounts.S})</span>
+              <span className="text-[10px] opacity-85">({tierCounts.S})</span>
             </button>
 
             <button
               onClick={() => setSelectedTier("A")}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+              className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                 selectedTier === "A"
                   ? "bg-orange-500 text-white shadow-md shadow-orange-500/30 font-black"
                   : "bg-orange-950/20 text-orange-300 hover:bg-orange-950/40 border border-orange-600/40"
               }`}
             >
               <span>🔥 Tier A</span>
-              <span className="text-[10px] opacity-80">({tierCounts.A})</span>
+              <span className="text-[10px] opacity-85">({tierCounts.A})</span>
             </button>
 
             <button
               onClick={() => setSelectedTier("B")}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+              className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                 selectedTier === "B"
                   ? "bg-sky-500 text-white shadow-md shadow-sky-500/30 font-black"
                   : "bg-sky-950/20 text-sky-300 hover:bg-sky-950/40 border border-sky-600/40"
               }`}
             >
               <span>✨ Tier B</span>
-              <span className="text-[10px] opacity-80">({tierCounts.B})</span>
+              <span className="text-[10px] opacity-85">({tierCounts.B})</span>
             </button>
 
             <button
               onClick={() => setSelectedTier("C")}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+              className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                 selectedTier === "C"
                   ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-black"
                   : "bg-emerald-950/20 text-emerald-300 hover:bg-emerald-950/40 border border-emerald-600/40"
               }`}
             >
               <span>👍 Tier C</span>
-              <span className="text-[10px] opacity-80">({tierCounts.C})</span>
+              <span className="text-[10px] opacity-85">({tierCounts.C})</span>
             </button>
 
             <button
               onClick={() => setSelectedTier("none")}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+              className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                 selectedTier === "none"
                   ? "bg-gray-600 text-white shadow-md font-bold"
-                  : "bg-[#131B2E] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
+                  : "bg-[#131B2E] text-slate-300 hover:text-white border border-[#1F2E45]"
               }`}
             >
               <span>⚪ ไม่ระบุ</span>
-              <span className="text-[10px] opacity-75">({tierCounts.none})</span>
+              <span className="text-[10px] opacity-80">({tierCounts.none})</span>
             </button>
           </div>
 
           {/* Tag Filter Bar */}
           {(allTags.length > 0 || selectedTag) && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none pt-0.5">
-              <span className="text-[11px] font-bold text-gray-400 shrink-0 mr-1 flex items-center gap-1">
+              <span className="text-[11px] font-bold text-slate-300 shrink-0 mr-1 flex items-center gap-1">
                 <Tag className="w-3 h-3 text-violet-400" />
                 <span>แท็ก:</span>
               </span>
@@ -1100,11 +1128,11 @@ export default function Home() {
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 flex items-center gap-1 ${
                       isSelected
                         ? "bg-violet-600 text-white font-bold shadow-md shadow-violet-600/30"
-                        : "bg-[#131B2E] text-violet-300 hover:text-white hover:bg-violet-950/40 border border-violet-500/20"
+                        : "bg-[#131B2E] text-violet-200 hover:text-white hover:bg-violet-950/40 border border-violet-500/20"
                     }`}
                   >
                     <span>#{tag}</span>
-                    <span className="text-[10px] opacity-70">({count})</span>
+                    <span className="text-[10px] opacity-80">({count})</span>
                   </button>
                 );
               })}
@@ -1117,10 +1145,10 @@ export default function Home() {
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
               <button
                 onClick={() => setCurrentTab("all")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 ${
                   currentTab === "all"
-                    ? "bg-gray-700/80 text-white"
-                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                    ? "bg-slate-700 text-white"
+                    : "bg-[#101726] text-slate-300 hover:text-white border border-[#1F2E45]/80"
                 }`}
               >
                 สถานะทั้งหมด ({categoryScopedMangas.length})
@@ -1129,12 +1157,12 @@ export default function Home() {
               {/* Has Updates Tab */}
               <button
                 onClick={() => setCurrentTab("has_update")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
                   currentTab === "has_update"
                     ? "bg-gradient-to-r from-orange-500 to-rose-600 text-white font-bold shadow-md shadow-orange-500/30"
                     : updatesCount > 0
-                    ? "bg-orange-950/40 text-orange-300 hover:bg-orange-900/50 border border-orange-700/50 animate-pulse font-bold"
-                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                    ? "bg-orange-950/40 text-orange-300 hover:bg-orange-900/50 border border-orange-700/50 font-bold"
+                    : "bg-[#101726] text-slate-300 hover:text-white border border-[#1F2E45]/80"
                 }`}
               >
                 <Flame className="w-3.5 h-3.5 text-orange-400" />
@@ -1143,10 +1171,10 @@ export default function Home() {
 
               <button
                 onClick={() => setCurrentTab("reading")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
                   currentTab === "reading"
                     ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
-                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                    : "bg-[#101726] text-slate-300 hover:text-white border border-[#1F2E45]/80"
                 }`}
               >
                 <Clock className="w-3.5 h-3.5" />
@@ -1155,10 +1183,10 @@ export default function Home() {
 
               <button
                 onClick={() => setCurrentTab("on_hold")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
                   currentTab === "on_hold"
                     ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
-                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                    : "bg-[#101726] text-slate-300 hover:text-white border border-[#1F2E45]/80"
                 }`}
               >
                 <BookmarkCheck className="w-3.5 h-3.5" />
@@ -1167,10 +1195,10 @@ export default function Home() {
 
               <button
                 onClick={() => setCurrentTab("completed")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
                   currentTab === "completed"
                     ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
-                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                    : "bg-[#101726] text-slate-300 hover:text-white border border-[#1F2E45]/80"
                 }`}
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1179,10 +1207,10 @@ export default function Home() {
 
               <button
                 onClick={() => setCurrentTab("dropped")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
                   currentTab === "dropped"
                     ? "bg-rose-700 text-white shadow-md shadow-rose-700/30 font-bold"
-                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                    : "bg-[#101726] text-slate-300 hover:text-white border border-[#1F2E45]/80"
                 }`}
               >
                 <span>🛑 เทแล้ว ({droppedCount})</span>
@@ -1190,10 +1218,10 @@ export default function Home() {
 
               <button
                 onClick={() => setCurrentTab("plan_to_read")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 ${
                   currentTab === "plan_to_read"
                     ? "bg-purple-700 text-white shadow-md shadow-purple-700/30 font-bold"
-                    : "bg-[#101726] text-gray-400 hover:text-gray-200 border border-[#1F2E45]/80"
+                    : "bg-[#101726] text-slate-300 hover:text-white border border-[#1F2E45]/80"
                 }`}
               >
                 <span>📌 อยากอ่าน ({planToReadCount})</span>
@@ -1202,26 +1230,41 @@ export default function Home() {
 
             {/* View Mode & Sort Selector Toolbar */}
             <div className="flex items-center gap-2 self-end sm:self-auto">
+              {hasActiveFilters && (
+                <button
+                  onClick={handleResetFilters}
+                  className="min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold bg-violet-950/60 hover:bg-violet-900/70 text-violet-200 border border-violet-600/40 flex items-center gap-1 transition active:scale-95"
+                  title="ล้างตัวกรองทั้งหมด"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>ล้างตัวกรอง ({filteredMangas.length})</span>
+                </button>
+              )}
+
               {/* View Mode Toggle Buttons */}
               <div className="flex items-center bg-[#131B2E] border border-[#1F2E45] rounded-xl p-0.5">
                 <button
                   onClick={() => handleToggleViewMode("poster")}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  aria-label="มุมมองโปสเตอร์"
+                  aria-pressed={viewMode === "poster"}
+                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
                     viewMode === "poster"
                       ? "bg-violet-600 text-white shadow-sm font-bold"
-                      : "text-gray-400 hover:text-gray-200"
+                      : "text-slate-300 hover:text-white"
                   }`}
-                  title="โหมดโปสเตอร์เน้นรูปปกสวยงาม (แบบในตัวอย่าง)"
+                  title="โหมดโปสเตอร์เน้นรูปปกสวยงาม"
                 >
                   <LayoutGrid className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">โปสเตอร์</span>
                 </button>
                 <button
                   onClick={() => handleToggleViewMode("compact")}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                  aria-label="มุมมองการ์ดมาตรฐาน"
+                  aria-pressed={viewMode === "compact"}
+                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
                     viewMode === "compact"
                       ? "bg-violet-600 text-white shadow-sm font-bold"
-                      : "text-gray-400 hover:text-gray-200"
+                      : "text-slate-300 hover:text-white"
                   }`}
                   title="โหมดการ์ดมาตรฐาน"
                 >
@@ -1235,7 +1278,8 @@ export default function Home() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as any)}
-                  className="bg-[#131B2E] border border-[#1F2E45] rounded-xl px-2.5 py-1.5 text-xs text-gray-200 outline-none"
+                  aria-label="เรียงลำดับการ์ตูน"
+                  className="min-h-[34px] bg-[#131B2E] border border-[#1F2E45] rounded-xl px-2.5 py-1.5 text-xs text-slate-100 outline-none"
                 >
                   <option value="recent">อ่านล่าสุด</option>
                   <option value="title">ชื่อเรื่อง (ก-ฮ / A-Z)</option>
@@ -1282,7 +1326,7 @@ export default function Home() {
                   ? "ไม่พบการ์ตูนที่ค้นหา"
                   : "ยังไม่มีการ์ตูนในหมวดนี้"}
               </h3>
-              <p className="text-xs text-gray-400 max-w-sm mt-1">
+              <p className="text-xs text-slate-300 max-w-sm mt-1">
                 {currentTab === "has_update"
                   ? "คุณอ่านทันทุกตอนแล้ว! กดปุ่มด้านล่างเพื่อตรวจหาตอนใหม่ล่าสุดจากเว็บอ่านการ์ตูน"
                   : selectedTag
@@ -1309,15 +1353,9 @@ export default function Home() {
               )}
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2">
-              {(searchQuery || selectedTag || selectedCategory !== "all" || selectedTier !== "all" || currentTab !== "all") && (
+              {hasActiveFilters && (
                 <button
-                  onClick={() => {
-                    setSearchQuery("");
-                    setSelectedTag(null);
-                    setSelectedCategory("all");
-                    setSelectedTier("all");
-                    setCurrentTab("all");
-                  }}
+                  onClick={handleResetFilters}
                   className="bg-[#182338] hover:bg-[#223250] text-violet-300 hover:text-white border border-violet-500/40 text-xs font-bold px-4 py-2.5 rounded-xl transition shadow"
                 >
                   ล้างตัวกรอง / คำค้นหาทั้งหมด
@@ -1354,6 +1392,7 @@ export default function Home() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRandom={() => setIsRandomOpen(true)}
         onOpenStats={() => setIsStatsOpen(true)}
+        unreadCount={updatesCount}
       />
 
       {/* Modals */}
@@ -1421,6 +1460,5 @@ export default function Home() {
         isDiscreetMode={isDiscreetMode}
       />
     </div>
-
   );
 }
