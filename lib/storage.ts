@@ -1057,20 +1057,31 @@ export async function removeManga(id: string): Promise<Manga[]> {
 }
 
 // Check updates for a manga across all its sources (primary + backups)
-export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChapter: number; hasUpdate: boolean; foundFromWeb: boolean }> {
+export async function checkMangaOnlineUpdate(manga: Manga): Promise<{
+  latestChapter: number;
+  hasUpdate: boolean;
+  foundFromWeb: boolean;
+  updatedSources?: MangaSource[];
+}> {
   if (!manga.sources || manga.sources.length === 0) {
     return { latestChapter: manga.current_chapter, hasUpdate: false, foundFromWeb: false };
   }
 
   let maxFoundFromWeb = 0;
   let foundUpdate = false;
+  let sourcesChanged = false;
+  const clonedSources = manga.sources.map((s) => ({ ...s }));
 
   // Check all active sources to find the absolute highest chapter available across all web sources!
-  const activeSources = manga.sources.filter((s) => s.is_active);
-  const sourcesToCheck = activeSources.length > 0 ? activeSources : manga.sources;
+  const activeSources = clonedSources.filter((s) => s.is_active);
+  const sourcesToCheck = activeSources.length > 0 ? activeSources : clonedSources;
 
   for (const source of sourcesToCheck) {
     const urlToCheck = source.base_url || source.current_chapter_url;
+    const fallbackUrl =
+      source.current_chapter_url && source.current_chapter_url !== urlToCheck
+        ? source.current_chapter_url
+        : undefined;
     if (!urlToCheck) continue;
 
     try {
@@ -1079,6 +1090,7 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: urlToCheck,
+          fallbackUrl,
           currentChapter: manga.current_chapter,
         }),
       });
@@ -1090,6 +1102,14 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
           }
           if (json.hasUpdate) {
             foundUpdate = true;
+          }
+          if (
+            typeof json.resolvedSeriesUrl === "string" &&
+            json.resolvedSeriesUrl &&
+            json.resolvedSeriesUrl !== source.base_url
+          ) {
+            source.base_url = json.resolvedSeriesUrl;
+            sourcesChanged = true;
           }
         }
       }
@@ -1104,6 +1124,7 @@ export async function checkMangaOnlineUpdate(manga: Manga): Promise<{ latestChap
     latestChapter,
     hasUpdate: (maxFoundFromWeb > 0 && maxFoundFromWeb > manga.current_chapter) || foundUpdate,
     foundFromWeb: maxFoundFromWeb > 0,
+    updatedSources: sourcesChanged ? clonedSources : undefined,
   };
 }
 

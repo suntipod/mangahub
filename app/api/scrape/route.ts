@@ -219,51 +219,77 @@ import { findBestCovers } from "@/lib/cover-search";
 // Find link back to series root from reader breadcrumb or "All Chapters"
 function findSeriesUrlFromHtml(html: string, currentUrl: string): string | null {
   const $ = cheerio.load(html);
-  let seriesUrl: string | null = null;
   try {
     const currentOrigin = new URL(currentUrl).origin;
-    $(".breadcrumb a, .allc a, .ts-breadcrumb a, .c-breadcrumb a, [itemprop='itemListElement'] a, .headpost a, a.allc").each((_, el) => {
-      if (seriesUrl) return;
-      const href = $(el).attr("href");
-      if (!href) return;
+    const isValidSeriesCandidate = (href: string | undefined): string | null => {
+      if (!href) return null;
       try {
         const target = new URL(href, currentUrl);
-        if (target.origin !== currentOrigin) return;
-        const path = target.pathname.replace(/\/$/, "");
-        if (!path || path === "" || path === "/manga" || path === "/series" || path === "/comics") {
-          return;
+        if (target.origin !== currentOrigin) return null;
+        if (!target.protocol.startsWith("http")) return null;
+        if (target.href.replace(/\/$/, "") === currentUrl.replace(/\/$/, "")) return null;
+
+        const path = safeDecodeURIComponent(target.pathname).replace(/\/$/, "");
+        if (
+          !path ||
+          path === "" ||
+          /^\/(?:manga|series|comics?|content|book|cartoon)$/i.test(path) ||
+          /\/(?:genre|manga-genre|category|tag|author|type|page|search)\//i.test(path + "/")
+        ) {
+          return null;
         }
-        if (target.href === currentUrl) return;
-        if (target.protocol.startsWith("http")) {
-          seriesUrl = target.href;
-        }
-      } catch {}
+        return target.href;
+      } catch {
+        return null;
+      }
+    };
+
+    let explicitSeriesUrl: string | null = null;
+    $(".allc a, a.allc, .headpost a").each((_, el) => {
+      if (explicitSeriesUrl) return;
+      const valid = isValidSeriesCandidate($(el).attr("href"));
+      if (valid) explicitSeriesUrl = valid;
     });
+    if (explicitSeriesUrl) return explicitSeriesUrl;
+
+    const breadcrumbCandidates: string[] = [];
+    $(".breadcrumb a, .ts-breadcrumb a, .c-breadcrumb a, [itemprop='itemListElement'] a").each((_, el) => {
+      const valid = isValidSeriesCandidate($(el).attr("href"));
+      if (valid) breadcrumbCandidates.push(valid);
+    });
+    if (breadcrumbCandidates.length > 0) {
+      return breadcrumbCandidates[breadcrumbCandidates.length - 1];
+    }
   } catch {}
-  return seriesUrl;
+  return null;
 }
 
 // Derive candidate series root page
 function deriveSeriesUrl(urlStr: string): string | null {
   try {
     const u = new URL(urlStr);
+    const host = u.hostname.toLowerCase();
     let pathname = safeDecodeURIComponent(u.pathname).replace(/\/+$/, "");
     pathname = pathname.replace(/^\/?\d+[-_]/, "/");
     const cleanPath = pathname
       .replace(/[-_](?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_]?\d+(?:\.\d+)?$/i, "")
       .replace(/\/(?:chapter|ch|ep|episode|ตอนที่|ตอน)[-_/]?\d+(?:\.\d+)?$/i, "")
       .replace(/\/\d+(?:\.\d+)?$/, "")
-      .replace(/[-_](\d+)$/, "");
+      .replace(/[-_](\d+(?:\.\d+)?)$/, "");
 
     const segments = cleanPath.split("/").filter(Boolean);
-    const slug = segments[segments.length - 1] || "";
-    const isAlreadyRoot =
-      segments.length === 2 &&
+    const hasPrefixDir =
+      segments.length >= 2 &&
       (segments[0] === "manga" || segments[0] === "series" || segments[0] === "comic" || segments[0] === "content");
 
-    if (isAlreadyRoot) {
+    if (hasPrefixDir) {
       return `${u.origin}/${segments[0]}/${segments[1]}/`;
-    } else if (slug && slug !== "manga" && slug !== "series" && slug !== "comic" && slug !== "content") {
+    }
+    const slug = segments[segments.length - 1] || "";
+    if (slug && !/^(?:manga|series|comics?|content|ซีซั่น)$/i.test(slug)) {
+      if (host.includes("dark-manga.com") || host.includes("niceoppai.net") || host.includes("reborntrans.com")) {
+        return `${u.origin}/${slug}/`;
+      }
       return `${u.origin}/manga/${slug}/`;
     }
   } catch {}

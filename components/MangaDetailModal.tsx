@@ -212,11 +212,36 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
     setCheckingUpdate(false);
     if (result.foundFromWeb && result.latestChapter) {
       setLatestChapter(result.latestChapter);
+      const nextSources = result.updatedSources
+        ? deduplicateSources(result.updatedSources, manga.id)
+        : deduplicateSources(sources, manga.id);
+      if (result.updatedSources) {
+        setSources(nextSources);
+      }
+
+      // Immediately persist latest_available_chapter to storage & Supabase so it isn't lost if user closes modal
+      const autoSaved: Manga = {
+        ...manga,
+        title: title.trim() || manga.title,
+        alt_title: altTitle.trim() || undefined,
+        cover_url: coverUrl.trim(),
+        current_chapter: currentChapter,
+        latest_available_chapter: result.latestChapter,
+        status,
+        tier,
+        category,
+        tags,
+        notes,
+        sources: nextSources,
+        updated_at: new Date().toISOString(),
+      };
+      onUpdate(autoSaved);
+
       if (result.hasUpdate) {
         setUpdateCheckMsg({
           text: `พบตอนใหม่ในเว็บถึงตอนที่ ${result.latestChapter}! (คุณตามหลังอยู่ ${
             result.latestChapter - currentChapter
-          } ตอน)`,
+          } ตอน) — บันทึกอัปเดตแล้ว`,
           isNew: true,
         });
       } else {

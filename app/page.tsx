@@ -323,7 +323,7 @@ export default function Home() {
     }
   };
 
-  // Check online updates for all mangas with linked sources
+  // Check online updates for all mangas with linked sources (parallelized in batches for 5x speed)
   const handleCheckAllUpdates = async () => {
     if (isCheckingUpdates || mangas.length === 0) return;
     setIsCheckingUpdates(true);
@@ -331,39 +331,68 @@ export default function Home() {
 
     const candidates = mangas.filter((m) => m.sources && m.sources.length > 0);
     let newUpdatesFound = 0;
+    let completedCount = 0;
+    const BATCH_SIZE = 6;
 
-    for (let i = 0; i < candidates.length; i++) {
-      setCheckProgress({ current: i + 1, total: candidates.length });
-      const candidate = candidates[i];
-      try {
-        // Read fresh manga from storage in case user incremented chapter during check
-        const freshManga = getLocalMangas().find((m) => m.id === candidate.id) || candidate;
-        const res = await checkMangaOnlineUpdate(freshManga);
-        if (res.foundFromWeb && res.latestChapter && res.latestChapter !== freshManga.latest_available_chapter) {
-          const latestFresh = getLocalMangas().find((m) => m.id === candidate.id) || freshManga;
-          if (res.hasUpdate && res.latestChapter > latestFresh.current_chapter) {
-            newUpdatesFound++;
+    setCheckProgress({ current: 0, total: candidates.length });
+
+    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+      const batch = candidates.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (candidate) => {
+          try {
+            const freshManga = getLocalMangas().find((m) => m.id === candidate.id) || candidate;
+            const res = await checkMangaOnlineUpdate(freshManga);
+            return { candidate, res };
+          } catch (err) {
+            console.error("Error checking update for:", candidate.title, err);
+            return { candidate, res: null };
+          } finally {
+            completedCount++;
+            setCheckProgress({ current: completedCount, total: candidates.length });
           }
+        })
+      );
+
+      for (const { candidate, res } of batchResults) {
+        if (!res || !res.foundFromWeb || !res.latestChapter) continue;
+        const latestFresh = getLocalMangas().find((m) => m.id === candidate.id) || candidate;
+        const chapterChanged = res.latestChapter !== latestFresh.latest_available_chapter;
+        const sourcesChanged = Boolean(res.updatedSources);
+
+        if (res.hasUpdate && res.latestChapter > latestFresh.current_chapter && chapterChanged) {
+          newUpdatesFound++;
+        }
+
+        if (chapterChanged || sourcesChanged) {
           const updated: Manga = {
             ...latestFresh,
             latest_available_chapter: res.latestChapter,
+            sources: res.updatedSources || latestFresh.sources,
             updated_at: new Date().toISOString(),
           };
           const currentList = await upsertManga(updated);
           setMangas(currentList);
+          setSelectedManga((prev) => (prev && prev.id === updated.id ? updated : prev));
         }
-      } catch (err) {
-        console.error("Error checking update for:", candidate.title, err);
       }
-      // Small pause between web requests
-      await new Promise((r) => setTimeout(r, 200));
     }
 
     setIsCheckingUpdates(false);
     setCheckProgress(null);
 
+    const totalWithUnread = getLocalMangas().filter(
+      (m) => m.latest_available_chapter && m.latest_available_chapter > m.current_chapter
+    ).length;
+
     if (newUpdatesFound > 0) {
-      setUpdateNotification(`🎉 ตรวจสอบเรียบร้อย! พบเรื่องที่มีตอนใหม่อัปเดต ${newUpdatesFound} เรื่อง`);
+      setUpdateNotification(
+        `🎉 ตรวจสอบเรียบร้อย! พบตอนใหม่อัปเดตเพิ่ม ${newUpdatesFound} เรื่อง (รวมมีตอนค้างอ่าน ${totalWithUnread} เรื่อง)`
+      );
+    } else if (totalWithUnread > 0) {
+      setUpdateNotification(
+        `✅ ตรวจสอบครบทุกเรื่องแล้ว! มีเรื่องที่มีตอนใหม่รออ่านทั้งหมด ${totalWithUnread} เรื่อง`
+      );
     } else {
       setUpdateNotification(`✅ ทุกเรื่องที่คุณติดตามเป็นตอนล่าสุดแล้ว ไม่มีตอนค้างอ่าน`);
     }
