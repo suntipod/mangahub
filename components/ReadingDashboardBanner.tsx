@@ -17,8 +17,7 @@ interface ReadingDashboardBannerProps {
   mangas: Manga[];
   onOpenStats: () => void;
   onOpenReader?: (manga: Manga) => void;
-  onTagClick?: (tag: string) => void;
-  onCategoryClick?: (category: string) => void;
+  onThemeClick?: (theme: string) => void;
 }
 
 export const THEME_KEYWORDS: Record<string, { label: string; shortLabel: string; icon: string; regex: RegExp }> = {
@@ -123,7 +122,7 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
   mangas,
   onOpenStats,
   onOpenReader,
-  onTagClick,
+  onThemeClick,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -275,7 +274,12 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
             <div className="w-full bg-[#162035] h-1.5 rounded-full overflow-hidden">
               <div
                 className="bg-gradient-to-r from-orange-500 to-amber-400 h-full rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(10, summary.chaptersThisWeek * 4))}%` }}
+                style={{
+                  width:
+                    summary.chaptersThisWeek === 0
+                      ? "0%"
+                      : `${Math.min(100, Math.max(10, summary.chaptersThisWeek * 4))}%`,
+                }}
               />
             </div>
           </div>
@@ -370,9 +374,9 @@ export const ReadingDashboardBanner: React.FC<ReadingDashboardBannerProps> = ({
                   key={th.label}
                   type="button"
                   onClick={() => {
-                    if (onTagClick) {
+                    if (onThemeClick) {
                       const clean = th.label.split("/")[0].trim();
-                      onTagClick(clean);
+                      onThemeClick(clean);
                     }
                   }}
                   className="text-[10px] font-semibold bg-[#151F33] hover:bg-violet-600/80 text-violet-200 hover:text-white px-2 py-0.5 rounded-lg border border-violet-500/20 transition active:scale-95"

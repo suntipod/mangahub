@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
-import { isSafeExternalUrl, safeDecodeURIComponent } from "@/lib/ssrf";
+import { hostnameMatches, isSafeExternalUrl, safeDecodeURIComponent, stripTrackingParams } from "@/lib/ssrf";
+import { isSafeExternalUrlAsync, safeFetch, SsrfBlockedError } from "@/lib/ssrf-server";
 
 // Helper to extract a friendly site name from URL
 function getSiteNameFromUrl(urlString: string): string {
@@ -145,7 +146,7 @@ function smartDeriveFromUrl(urlString: string): { title: string; isJunk: boolean
       "vercel.app",
     ];
     const host = parsed.hostname.toLowerCase();
-    if (JUNK_DOMAINS.some((d) => host === d || host.endsWith("." + d))) {
+    if (JUNK_DOMAINS.some((d) => hostnameMatches(host, d))) {
       return { title: "", isJunk: true };
     }
 
@@ -287,7 +288,11 @@ function deriveSeriesUrl(urlStr: string): string | null {
     }
     const slug = segments[segments.length - 1] || "";
     if (slug && !/^(?:manga|series|comics?|content|ซีซั่น)$/i.test(slug)) {
-      if (host.includes("dark-manga.com") || host.includes("niceoppai.net") || host.includes("reborntrans.com")) {
+      if (
+        hostnameMatches(host, "dark-manga.com") ||
+        hostnameMatches(host, "niceoppai.net") ||
+        hostnameMatches(host, "reborntrans.com")
+      ) {
         return `${u.origin}/${slug}/`;
       }
       return `${u.origin}/manga/${slug}/`;
@@ -317,14 +322,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!isSafeExternalUrl(url.trim())) {
+    if (!isSafeExternalUrl(url.trim()) || !(await isSafeExternalUrlAsync(url.trim()))) {
       return NextResponse.json(
         { success: false, error: "รูปแบบ URL ไม่ถูกต้องหรือไม่อนุญาต" },
         { status: 400 }
       );
     }
 
-    const parsedUrl = new URL(url.trim());
+    const cleanHref = stripTrackingParams(url.trim());
+    const parsedUrl = new URL(cleanHref);
 
     const siteName = getSiteNameFromUrl(parsedUrl.href);
     let detectedChapter = extractChapterFromUrl(parsedUrl.href);
@@ -345,9 +351,10 @@ export async function POST(req: NextRequest) {
 
     let seriesUrl = "";
 
-    // Fetch the webpage with realistic browser User-Agent
+    // Fetch the webpage safely with DNS check & manual redirect validation
+    let cleanup: (() => void) | null = null;
     try {
-      const response = await fetch(parsedUrl.href, {
+      const fetched = await safeFetch(parsedUrl.href, {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -355,10 +362,12 @@ export async function POST(req: NextRequest) {
             "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
           "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7",
         },
-        signal: AbortSignal.timeout(8000),
+        timeoutMs: 8000,
       });
+      cleanup = fetched.cleanup;
+      const response = fetched.response;
 
-      if (response.ok && (!response.url || isSafeExternalUrl(response.url))) {
+      if (response.ok) {
         const html = await response.text();
         const $ = cheerio.load(html);
 
@@ -383,7 +392,7 @@ export async function POST(req: NextRequest) {
 
         // ReadToon bug fix: replace localhost:3000 leak with public CDN domain
         if (coverUrl.includes("localhost:3000")) {
-          if (parsedUrl.hostname.includes("readtoon.com")) {
+          if (hostnameMatches(parsedUrl.hostname, "readtoon.com")) {
             coverUrl = coverUrl.replace(/https?:\/\/localhost:3000/, "https://w.nobuild.pro");
           } else {
             coverUrl = "";
@@ -391,9 +400,9 @@ export async function POST(req: NextRequest) {
         }
 
         // 3. Extract Canonical Series URL from reader breadcrumb
-        const breadcrumbSeries = findSeriesUrlFromHtml(html, parsedUrl.href);
+        const breadcrumbSeries = findSeriesUrlFromHtml(html, fetched.finalUrl || parsedUrl.href);
         if (breadcrumbSeries) {
-          seriesUrl = breadcrumbSeries;
+          seriesUrl = stripTrackingParams(breadcrumbSeries);
         }
 
         // 4. Extract Chapter from HTML if not detected from URL alone
@@ -421,8 +430,16 @@ export async function POST(req: NextRequest) {
 
         fetchSuccess = true;
       }
-    } catch (fetchErr) {
+    } catch (fetchErr: any) {
+      if (fetchErr instanceof SsrfBlockedError || fetchErr?.code === "SSRF_BLOCKED") {
+        return NextResponse.json(
+          { success: false, error: "รูปแบบ URL ไม่ถูกต้องหรือไม่อนุญาต (Unsafe redirect)" },
+          { status: 400 }
+        );
+      }
       // Scrape timed out or blocked (Cloudflare), fallback gracefully
+    } finally {
+      cleanup?.();
     }
 
     // Fallback: If title extraction failed or returned empty/junk, use providedTitle or smart URL derivation

@@ -1,6 +1,7 @@
 import { Manga, MangaSource, MangaBackupData } from "@/types/manga";
-import { getSupabaseClient, syncMangaToRemote, deleteRemoteManga, fetchRemoteMangas, ensureUUID } from "./supabase";
+import { getSupabaseClient, syncMangaToRemote, deleteRemoteManga, fetchRemoteMangas, ensureUUID, markLocalWriteTimestamp } from "./supabase";
 import { getStoredCategories, addCategory } from "./categories";
+import { hostnameMatches, stripTrackingParams, toSafeHttpUrl } from "./ssrf";
 
 const LOCAL_STORAGE_KEY = "mangahub_local_mangas";
 const DELETED_IDS_KEY = "mangahub_deleted_ids";
@@ -146,8 +147,12 @@ export function deduplicateSources(sources?: MangaSource[], mangaId?: string): M
 
   for (const raw of sources) {
     if (!raw || typeof raw !== "object") continue;
-    const baseUrl = (raw.base_url || raw.current_chapter_url || (raw as any).url || "").trim();
-    const curUrl = (raw.current_chapter_url || raw.base_url || (raw as any).url || "").trim();
+    const rawBaseCandidate = (raw.base_url || raw.current_chapter_url || (raw as any).url || "").trim();
+    const rawCurCandidate = (raw.current_chapter_url || raw.base_url || (raw as any).url || "").trim();
+    const safeBase = toSafeHttpUrl(rawBaseCandidate);
+    const safeCur = toSafeHttpUrl(rawCurCandidate);
+    const baseUrl = safeBase ? stripTrackingParams(safeBase) : "";
+    const curUrl = safeCur ? stripTrackingParams(safeCur) : "";
     if (!baseUrl && !curUrl) continue;
 
     const normBase = normalizeSourceUrl(baseUrl);
@@ -319,9 +324,30 @@ export const JUNK_DOMAINS = [
 ];
 
 export function isJunkDomain(hostname: string): boolean {
-  const host = (hostname || "").toLowerCase().replace(/^www\./, "");
-  if (!host) return false;
-  return JUNK_DOMAINS.some((d) => host === d || host.endsWith("." + d));
+  if (!hostname) return false;
+  return JUNK_DOMAINS.some((d) => hostnameMatches(hostname, d));
+}
+
+export function isJunkSourceUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== "string") return false;
+  try {
+    const u = new URL(urlStr.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return true;
+    if (isJunkDomain(u.hostname)) return true;
+    const p = u.pathname.replace(/\/$/, "");
+    if (
+      p === "" ||
+      /^\/(?:manga|comics|comic|read|page\/\d+|topup|payments?|auth|login|signin|register|search)$/i.test(p)
+    ) {
+      return true;
+    }
+    if (u.searchParams.has("s") && u.searchParams.get("s") && p === "") {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 // Check if a manga or URL is junk (non-manga utility or error page)
@@ -336,26 +362,16 @@ export function isJunkManga(m: Manga): boolean {
   // Mangas without online sources yet are still valid titles, do not treat as junk
   if (sources.length === 0) return false;
 
-  for (const s of sources) {
-    if (!s) continue;
-    const urlStr = s.base_url || s.current_chapter_url || (s as any).url || "";
-    if (!urlStr) continue;
-    try {
-      const u = new URL(urlStr);
-      if (isJunkDomain(u.hostname)) return true;
-      const p = u.pathname.replace(/\/$/, "");
-      if (p === "" || /^\/(?:manga|comics|comic|read|page\/\d+|topup|payments?|auth|login|signin|register|search)$/i.test(p)) {
-        return true;
-      }
-      if (u.searchParams.has("s") && u.searchParams.get("s") && p === "") {
-        return true;
-      }
-    } catch {
-      // Invalid URL does not make the whole manga junk if title is valid
-    }
-  }
+  const sourceUrls = sources
+    .filter(Boolean)
+    .map((s) => (s.base_url || s.current_chapter_url || (s as any).url || "").trim())
+    .filter(Boolean);
 
-  return false;
+  if (sourceUrls.length === 0) return false;
+
+  // Treat manga as junk ONLY if EVERY non-empty source URL is junk/homepage,
+  // so adding a bad backup URL to an existing valid manga never wipes the manga.
+  return sourceUrls.every((u) => isJunkSourceUrl(u));
 }
 
 function getNonGenericSourceUrls(m: Manga): string[] {
@@ -604,6 +620,7 @@ export function computeNextChapterUrl(url: string, nextChapter: number): string 
   try {
     const parsed = new URL(url);
     let pathname = safeDecodeURIComponent(parsed.pathname);
+    const finalizePath = (p: string) => p.replace(/\?/g, "%3F").replace(/#/g, "%23");
 
     // Do not corrupt internal book/read ID URLs like /cartoon/book/714/read/25347
     if (/(?:cartoon|book|read)\/\d+\/read\/\d+/i.test(pathname)) {
@@ -624,7 +641,7 @@ export function computeNextChapterUrl(url: string, nextChapter: number): string 
         pathname.slice(0, matchIdx) +
         `${prefix}${kwPart}${nextChapter}` +
         pathname.slice(matchIdx + fullMatched.length);
-      return `${parsed.origin}${pathname}${parsed.search || ""}`;
+      return `${parsed.origin}${finalizePath(pathname)}${parsed.search || ""}`;
     }
 
     // Guard: If the URL is a 2-segment series root page (/manga/{slug}, /series/{slug}, /comic/{slug}, /content/{slug})
@@ -641,21 +658,21 @@ export function computeNextChapterUrl(url: string, nextChapter: number): string 
     const leadMatch = pathname.match(/^(\/?)(\d+(?:\.\d+)?)([-_][a-zA-Z][^\/]*\/?)$/);
     if (leadMatch) {
       pathname = `${leadMatch[1]}${nextChapter}${leadMatch[3]}`;
-      return `${parsed.origin}${pathname}${parsed.search || ""}`;
+      return `${parsed.origin}${finalizePath(pathname)}${parsed.search || ""}`;
     }
 
     // 3. Trailing hyphen/underscore number e.g. /regressor-of-the-fallen-family-126/ -> /regressor-of-the-fallen-family-127/
     const trailMatch = pathname.match(/([-_])(\d+(?:\.\d+)?)([\/]?)$/);
     if (trailMatch) {
       pathname = pathname.replace(/([-_])(\d+(?:\.\d+)?)([\/]?)$/, `$1${nextChapter}$3`);
-      return `${parsed.origin}${pathname}${parsed.search || ""}`;
+      return `${parsed.origin}${finalizePath(pathname)}${parsed.search || ""}`;
     }
 
     // 4. Trailing number after slash e.g. /heavyknight/116/ or /nano-machine/118
     const slashMatch = pathname.match(/\/(\d+(?:\.\d+)?)([\/]?)$/);
     if (slashMatch) {
       pathname = pathname.replace(/\/(\d+(?:\.\d+)?)([\/]?)$/, `/${nextChapter}$2`);
-      return `${parsed.origin}${pathname}${parsed.search || ""}`;
+      return `${parsed.origin}${finalizePath(pathname)}${parsed.search || ""}`;
     }
 
     return url;
@@ -668,7 +685,8 @@ export function computeNextChapterUrl(url: string, nextChapter: number): string 
 export async function syncWithSupabase(): Promise<{ synced: number; error?: string }> {
   const client = getSupabaseClient();
   if (!client) {
-    return { synced: 0 };
+    lastSyncError = "ยังไม่ได้ตั้งค่า URL หรือ API Key ของ Supabase";
+    return { synced: 0, error: lastSyncError };
   }
 
   try {
@@ -690,8 +708,8 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
     );
     const localMangas = getLocalMangas();
 
-    // Deduplicate combined local and remote using last-write-wins (updated_at)
-    const mergedList = deduplicateMangas([...localMangas, ...remoteMangas]);
+    // Deduplicate combined remote and local using last-write-wins (preferring remote Supabase UUIDs when equivalent)
+    const mergedList = deduplicateMangas([...remoteMangas, ...localMangas]);
     saveLocalMangas(mergedList);
 
     const syncErrors: string[] = [];
@@ -722,15 +740,6 @@ export async function syncWithSupabase(): Promise<{ synced: number; error?: stri
       }
     }
 
-    // Also push merged to local server cache in background
-    try {
-      fetch("/api/mangas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mergedList),
-      }).catch(() => {});
-    } catch {}
-
     if (syncErrors.length > 0) {
       lastSyncError = syncErrors[0];
       return { synced: mergedList.length, error: syncErrors[0] };
@@ -749,30 +758,49 @@ export async function upsertManga(manga: Manga): Promise<Manga[]> {
   const current = getLocalMangas();
   const incomingUrls = new Set(getNonGenericSourceUrls(manga));
 
-  // Match existing record strictly by ID or exact normalized source URL (never loose substring title)
+  // Match existing record by ID, exact source URL, or equivalent manga title
   const index = current.findIndex((m) => {
     if (m.id === manga.id) return true;
     if (incomingUrls.size > 0) {
       const mUrls = getNonGenericSourceUrls(m);
       if (mUrls.some((u) => incomingUrls.has(u))) return true;
     }
-    return false;
+    return areMangasEquivalent(m, manga);
   });
 
-  const targetId = index >= 0 ? current[index].id : manga.id;
+  const existing = index >= 0 ? current[index] : undefined;
+  const targetId = existing ? existing.id : manga.id;
   removeDeletedMangaId(targetId);
   const now = new Date().toISOString();
 
+  const incomingSources = Array.isArray(manga.sources) ? manga.sources : [];
+  const mergedSourcesRaw =
+    existing && existing.id !== manga.id
+      ? [...incomingSources, ...(existing.sources || []).map((s) => ({ ...s, is_primary: false }))]
+      : incomingSources;
+
   // Deduplicate and normalize sources for targetId
-  const fixedSources = deduplicateSources(manga.sources || [], targetId);
+  const fixedSources = deduplicateSources(mergedSourcesRaw, targetId);
 
   const updatedManga: Manga = normalizeMangaRecord({
-    ...(index >= 0 ? current[index] : {}),
+    ...(existing || {}),
     ...manga,
     id: targetId,
+    cover_url:
+      manga.cover_url && manga.cover_url.trim()
+        ? manga.cover_url.trim()
+        : existing?.cover_url || "",
+    tags:
+      existing && existing.id !== manga.id
+        ? Array.from(new Set([...(existing.tags || []), ...(manga.tags || [])]))
+        : manga.tags,
     sources: fixedSources,
     updated_at: now,
   });
+
+  if (isJunkManga(updatedManga)) {
+    return current;
+  }
 
   let newList: Manga[];
   if (index >= 0) {
@@ -794,16 +822,16 @@ export async function upsertManga(manga: Manga): Promise<Manga[]> {
       console.error("Supabase sync failed in upsertManga:", err);
       lastSyncError = err?.message || "Supabase sync failed";
     }
+  } else {
+    // Only push to local server /api/mangas fallback when Supabase is disabled
+    try {
+      fetch("/api/mangas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedManga),
+      }).catch(() => {});
+    } catch (err) {}
   }
-
-  // Push to server database in background without overwriting local cache
-  try {
-    fetch("/api/mangas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updatedManga),
-    }).catch(() => {});
-  } catch (err) {}
 
   return getLocalMangas();
 }
@@ -814,22 +842,33 @@ export async function upsertMangas(mangasToAdd: Manga[]): Promise<Manga[]> {
 
   const current = getLocalMangas();
   const now = new Date().toISOString();
-  const stampedToAdd = mangasToAdd.map((m) => {
-    removeDeletedMangaId(m.id);
-    return normalizeMangaRecord({
-      ...m,
-      updated_at: now,
-    });
-  });
+  const stampedToAdd = mangasToAdd
+    .map((m) => normalizeMangaRecord({ ...m, updated_at: now }))
+    .filter((m) => !isJunkManga(m));
 
-  const newList = deduplicateMangas([...stampedToAdd, ...current]);
+  if (stampedToAdd.length === 0) return current;
+
+  // Put existing current records first so original Supabase UUIDs always take precedence!
+  const newList = deduplicateMangas([...current, ...stampedToAdd]);
+  newList.forEach((m) => removeDeletedMangaId(m.id));
   saveLocalMangas(newList);
+
+  // Find the deduplicated/merged target records matching this batch
+  const syncedIds = new Set<string>();
+  const recordsToSync: Manga[] = [];
+  for (const inc of stampedToAdd) {
+    const mergedTarget = newList.find((m) => m.id === inc.id || areMangasEquivalent(m, inc));
+    if (mergedTarget && !syncedIds.has(mergedTarget.id)) {
+      syncedIds.add(mergedTarget.id);
+      recordsToSync.push(mergedTarget);
+    }
+  }
 
   // Sync to Supabase
   const client = getSupabaseClient();
   if (client) {
     let batchErr: string | null = null;
-    for (const m of stampedToAdd) {
+    for (const m of recordsToSync) {
       try {
         await syncMangaToRemote(client, m);
       } catch (err: any) {
@@ -838,18 +877,18 @@ export async function upsertMangas(mangasToAdd: Manga[]): Promise<Manga[]> {
       }
     }
     lastSyncError = batchErr;
+  } else {
+    // Only push batch to /api/mangas fallback when Supabase is disabled
+    try {
+      fetch("/api/mangas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(recordsToSync),
+      }).catch(() => {});
+    } catch (err) {}
   }
 
-  // Push batch to server API in background without overwriting local cache
-  try {
-    fetch("/api/mangas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(stampedToAdd),
-    }).catch(() => {});
-  } catch (err) {}
-
-  return newList;
+  return getLocalMangas();
 }
 
 export interface ReadLogEntry {
@@ -1036,12 +1075,6 @@ export async function removeManga(id: string): Promise<Manga[]> {
     } catch {}
   }
 
-  try {
-    await fetch(`/api/mangas?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-  } catch (err) {
-    console.warn("Could not delete from server API:", err);
-  }
-
   const client = getSupabaseClient();
   if (client) {
     try {
@@ -1050,6 +1083,12 @@ export async function removeManga(id: string): Promise<Manga[]> {
     } catch (err: any) {
       console.error("Remote Supabase delete failed:", err);
       lastSyncError = err?.message || "Remote Supabase delete failed";
+    }
+  } else {
+    try {
+      await fetch(`/api/mangas?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch (err) {
+      console.warn("Could not delete from server API:", err);
     }
   }
 
@@ -1179,7 +1218,11 @@ export function exportMangasToCsv(mangas?: Manga[]): string {
 
   const escapeCsv = (val: any): string => {
     if (val === undefined || val === null) return "";
-    const str = String(val);
+    let str = String(val);
+    // Neutralize CSV formula injection (=, +, -, @, tab, CR) when opened in Excel/Sheets
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'${str}`;
+    }
     if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
       return `"${str.replace(/"/g, '""')}"`;
     }
@@ -1299,10 +1342,11 @@ export function parseCsvToMangas(csvText: string): { mangas: Manga[]; categories
   const notesCol = findCol(["บันทึกช่วยจำ (notes)", "บันทึก", "notes", "note", "memo"]);
   const tagsCol = findCol(["แท็ก", "tags", "tag"]);
   const siteCol = findCol(["เว็บอ่านหลัก", "ชื่อเว็บหลัก", "ชื่อเว็บ", "site_name", "เว็บ", "site", "source"]);
-  const curUrlCol = findCol(["ลิงก์ตอนปัจจุบัน", "ตอนปัจจุบัน", "current_chapter_url", "chapter_url", "current_url", "url"]);
-  const baseCol = findCol(["ลิงก์หน้าหลักการ์ตูน", "หน้าหลัก", "base_url", "main_url"]);
-  const lastReadCol = findCol(["อ่านล่าสุดเมื่อ", "อ่านล่าสุด", "last_read_at", "last_read"]);
+  // Claim coverCol and baseCol BEFORE curUrlCol so "cover_url" is never hijacked by generic "url"
   const coverCol = findCol(["ลิงก์รูปหน้าปก", "รูปหน้าปก", "cover_url", "รูป", "cover", "image"]);
+  const baseCol = findCol(["ลิงก์หน้าหลักการ์ตูน", "หน้าหลัก", "base_url", "main_url"]);
+  const curUrlCol = findCol(["ลิงก์ตอนปัจจุบัน", "ตอนปัจจุบัน", "current_chapter_url", "chapter_url", "current_url", "url"]);
+  const lastReadCol = findCol(["อ่านล่าสุดเมื่อ", "อ่านล่าสุด", "last_read_at", "last_read"]);
 
   // If first row looked like a header row, start from row 1; else row 0
   const dataRows = titleCol !== -1 ? matrix.slice(1) : matrix;
@@ -1451,7 +1495,7 @@ export async function restoreBackupData(
     syncSupabase?: boolean;
   },
   onProgress?: (current: number, total: number) => void
-): Promise<{ success: boolean; count: number; error?: string }> {
+): Promise<{ success: boolean; count: number; error?: string; syncError?: string }> {
   try {
     if (!rawPayload) {
       return { success: false, count: 0, error: "ไฟล์สำรองไม่มีข้อมูล" };
@@ -1481,7 +1525,52 @@ export async function restoreBackupData(
       return { success: false, count: 0, error: "ไม่พบข้อมูลมังงะที่ถูกต้องในไฟล์" };
     }
 
-    // Import any custom categories
+    let finalList: Manga[] = [];
+    let listToSync: Manga[] = [];
+
+    if (options.mode === "replace") {
+      const oldLocal = getLocalMangas();
+      // Preserve existing Supabase UUIDs when equivalent titles exist in the backup (e.g. CSV without id column)
+      const withPreservedIds = validMangas.map((vm) => {
+        const match = oldLocal.find((om) => om.id === vm.id || areMangasEquivalent(om, vm));
+        return match ? { ...vm, id: match.id } : vm;
+      });
+      finalList = deduplicateMangas(withPreservedIds);
+      if (finalList.length === 0) {
+        return { success: false, count: 0, error: "ไม่พบข้อมูลมังงะที่ถูกต้องสำหรับเขียนทับ (ระบบยกเลิกเพื่อป้องกันข้อมูลสูญหาย)" };
+      }
+      if (options.syncSupabase) {
+        const keepUuids = new Set(finalList.map((m) => ensureUUID(m.id)));
+        oldLocal.forEach((oldM) => {
+          if (!keepUuids.has(ensureUUID(oldM.id))) {
+            addDeletedMangaId(oldM.id);
+          }
+        });
+      }
+      finalList.forEach((newM) => removeDeletedMangaId(newM.id));
+      saveLocalMangas(finalList);
+      listToSync = finalList;
+    } else {
+      const current = getLocalMangas();
+      // Existing current records first so original UUIDs always win over freshly generated IDs
+      finalList = deduplicateMangas([...current, ...validMangas]);
+      if (finalList.length === 0) {
+        return { success: false, count: 0, error: "ไม่พบข้อมูลมังงะที่ถูกต้องสำหรับผสานข้อมูล" };
+      }
+      finalList.forEach((m) => removeDeletedMangaId(m.id));
+      saveLocalMangas(finalList);
+
+      const syncedIds = new Set<string>();
+      for (const vm of validMangas) {
+        const mergedTarget = finalList.find((m) => m.id === vm.id || areMangasEquivalent(m, vm));
+        if (mergedTarget && !syncedIds.has(mergedTarget.id)) {
+          syncedIds.add(mergedTarget.id);
+          listToSync.push(mergedTarget);
+        }
+      }
+    }
+
+    // Import any custom categories after validation passes
     if (importedCategories.length > 0) {
       importedCategories.forEach((cat) => {
         if (typeof cat === "string" && cat.trim()) {
@@ -1490,69 +1579,58 @@ export async function restoreBackupData(
       });
     }
 
-    let finalList: Manga[] = [];
-    if (options.mode === "replace") {
-      const oldLocal = getLocalMangas();
-      finalList = deduplicateMangas(validMangas);
-      const keepUuids = new Set(finalList.map((m) => ensureUUID(m.id)));
-      oldLocal.forEach((oldM) => {
-        if (!keepUuids.has(ensureUUID(oldM.id))) {
-          addDeletedMangaId(oldM.id);
-        }
-      });
-      finalList.forEach((newM) => removeDeletedMangaId(newM.id));
-      saveLocalMangas(finalList);
-    } else {
-      validMangas.forEach((newM) => removeDeletedMangaId(newM.id));
-      const current = getLocalMangas();
-      finalList = deduplicateMangas([...validMangas, ...current]);
-      saveLocalMangas(finalList);
-    }
+    let restoreSyncError: string | undefined = undefined;
+    const client = getSupabaseClient();
 
     // If syncSupabase is requested, sync with remote (and delete old records in replace mode)
-    if (options.syncSupabase) {
-      const client = getSupabaseClient();
-      if (client) {
-        if (options.mode === "replace") {
-          try {
-            const { data: existingRemote } = await client.from("mangas").select("id");
-            const keepUuids = new Set(finalList.map((m) => ensureUUID(m.id)));
-            const toDelete = (existingRemote || [])
-              .map((r: any) => r.id)
-              .filter((id: string) => !keepUuids.has(id));
-            if (toDelete.length > 0) {
-              await client.from("mangas").delete().in("id", toDelete);
-            }
-          } catch (err) {
-            console.error("Failed to clean old remote mangas on replace restore:", err);
+    if (options.syncSupabase && client) {
+      if (options.mode === "replace") {
+        try {
+          markLocalWriteTimestamp();
+          const { data: existingRemote, error: fetchErr } = await client.from("mangas").select("id");
+          if (fetchErr) throw fetchErr;
+          const keepUuids = new Set(finalList.map((m) => ensureUUID(m.id)));
+          const toDelete = (existingRemote || [])
+            .map((r: any) => r.id)
+            .filter((id: string) => !keepUuids.has(id));
+          if (toDelete.length > 0) {
+            const { error: delErr } = await client.from("mangas").delete().in("id", toDelete);
+            if (delErr) throw delErr;
           }
-        }
-
-        const listToSync = options.mode === "replace" ? finalList : validMangas;
-        for (let i = 0; i < listToSync.length; i++) {
-          try {
-            await syncMangaToRemote(client, listToSync[i]);
-          } catch (err) {
-            console.error("Supabase restore sync failed for:", listToSync[i].title, err);
-          }
-          if (onProgress) {
-            onProgress(i + 1, listToSync.length);
-          }
+          markLocalWriteTimestamp();
+        } catch (err: any) {
+          console.error("Failed to clean old remote mangas on replace restore:", err);
+          restoreSyncError = err?.message || "Failed to clean old remote mangas";
         }
       }
+
+      for (let i = 0; i < listToSync.length; i++) {
+        try {
+          await syncMangaToRemote(client, listToSync[i]);
+        } catch (err: any) {
+          console.error("Supabase restore sync failed for:", listToSync[i].title, err);
+          if (!restoreSyncError) {
+            restoreSyncError = err?.message || "Supabase restore sync failed";
+          }
+        }
+        if (onProgress) {
+          onProgress(i + 1, listToSync.length);
+        }
+      }
+      lastSyncError = restoreSyncError || null;
+    } else if (!client) {
+      // Only push to local server API fallback when Supabase is disabled
+      try {
+        const endpoint = options.mode === "replace" ? "/api/mangas?mode=replace" : "/api/mangas";
+        await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(finalList),
+        });
+      } catch {}
     }
 
-    // Push to server API (using ?mode=replace when replacing)
-    try {
-      const endpoint = options.mode === "replace" ? "/api/mangas?mode=replace" : "/api/mangas";
-      await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(finalList),
-      });
-    } catch {}
-
-    return { success: true, count: finalList.length };
+    return { success: true, count: finalList.length, syncError: restoreSyncError };
   } catch (e: any) {
     console.error("Restore backup error:", e);
     return { success: false, count: 0, error: e.message || "เกิดข้อผิดพลาดในการกู้คืนข้อมูล" };

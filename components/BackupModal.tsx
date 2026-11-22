@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Manga, MangaBackupData } from "@/types/manga";
 import {
   X,
@@ -27,7 +27,7 @@ interface BackupModalProps {
   onClose: () => void;
   mangas: Manga[];
   supabaseEnabled: boolean;
-  onDataRestored: () => void;
+  onDataRestored: (meta?: { syncedToCloud?: boolean; syncError?: string }) => void;
 }
 
 export const BackupModal: React.FC<BackupModalProps> = ({
@@ -49,9 +49,34 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<{ current: number; total: number } | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState<{ count: number } | null>(null);
+  const [restoreSyncWarning, setRestoreSyncWarning] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSyncSupabase(supabaseEnabled);
+      if (!isRestoring) {
+        setSelectedFile(null);
+        setParsedData(null);
+        setImportError(null);
+        setRestoreSuccess(null);
+        setRestoreSyncWarning(null);
+        setRestoreProgress(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    }
+  }, [isOpen, supabaseEnabled, isRestoring]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isRestoring) onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isRestoring, onClose]);
 
   if (!isOpen) return null;
 
@@ -68,11 +93,12 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     const timeStr = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
     const filename = `mangahub-backup-${dateStr}-${timeStr}.json`;
 
+    const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    a.href = objectUrl;
     a.download = filename;
     a.click();
-    URL.revokeObjectURL(a.href);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   };
 
   // Handle Export Excel / CSV File Download
@@ -84,11 +110,12 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     const timeStr = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
     const filename = `mangahub-mangas-${dateStr}-${timeStr}.csv`;
 
+    const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    a.href = objectUrl;
     a.download = filename;
     a.click();
-    URL.revokeObjectURL(a.href);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   };
 
   // Handle Copy JSON to Clipboard
@@ -229,14 +256,16 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
     setIsRestoring(true);
     setImportError(null);
+    setRestoreSyncWarning(null);
     setRestoreProgress({ current: 0, total: parsedData.mangas.length });
 
     try {
+      const shouldSyncCloud = syncSupabase && supabaseEnabled;
       const res = await restoreBackupData(
         parsedData,
         {
           mode: importMode,
-          syncSupabase: syncSupabase && supabaseEnabled,
+          syncSupabase: shouldSyncCloud,
         },
         (cur, tot) => {
           setRestoreProgress({ current: cur, total: tot });
@@ -245,7 +274,10 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
       if (res.success) {
         setRestoreSuccess({ count: res.count });
-        onDataRestored();
+        if (res.syncError) {
+          setRestoreSyncWarning(res.syncError);
+        }
+        onDataRestored({ syncedToCloud: shouldSyncCloud, syncError: res.syncError });
       } else {
         setImportError(res.error || "เกิดข้อผิดพลาดในการกู้คืนข้อมูล");
       }
@@ -258,7 +290,15 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="สำรองและกู้คืนข้อมูล"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isRestoring) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
       <div className="relative w-full max-w-lg max-h-[92vh] flex flex-col bg-[#0F172A] border border-[#1E293B] rounded-3xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#1E293B] bg-[#0A0F1D]">
@@ -397,7 +437,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                   • <strong>ไฟล์ .json</strong>: บันทึกข้อมูลครบถ้วนที่สุด เหมาะสำหรับสำรองไว้กู้คืนข้อมูลหรือย้ายเครื่อง
                 </p>
                 <p>
-                  • <strong>ไฟล์ .csv</strong>: เปิดดูใน Microsoft Excel หรือ Google Sheets ได้ทันที ภาษาไทยไม่เพี้ยน
+                  • <strong>ไฟล์ .csv</strong>: เปิดดูใน Microsoft Excel หรือ Google Sheets ได้ทันที ภาษาไทยไม่เพี้ยน (เก็บเฉพาะลิงก์เว็บหลัก ถ้าต้องการลิงก์สำรองครบทุกเว็บแนะนำใช้ .json)
                 </p>
               </div>
             </div>
@@ -486,11 +526,19 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
               {/* Success Message */}
               {restoreSuccess && (
-                <div className="flex items-center gap-2 p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-xs text-emerald-300">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  <span>
-                    🎉 กู้คืนข้อมูลสำเร็จจำนวน {restoreSuccess.count} เรื่องเรียบร้อยแล้ว!
-                  </span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-xs text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <span>
+                      🎉 กู้คืนข้อมูลในเครื่องสำเร็จจำนวน {restoreSuccess.count} เรื่องเรียบร้อยแล้ว!
+                    </span>
+                  </div>
+                  {restoreSyncWarning && (
+                    <div className="flex items-center gap-2 p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-300">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                      <span>⚠️ คำเตือนซิงค์ Cloud: {restoreSyncWarning}</span>
+                    </div>
+                  )}
                 </div>
               )}
 

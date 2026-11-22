@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
-import { isSafeExternalUrl, safeDecodeURIComponent } from "@/lib/ssrf";
+import { hostnameMatches, isSafeExternalUrl, safeDecodeURIComponent, stripTrackingParams } from "@/lib/ssrf";
+import { isSafeExternalUrlAsync, safeFetch } from "@/lib/ssrf-server";
 
 // Dedicated chapter container selectors across all major manga platforms/themes (WordPress Madara, MangaStream, MangaThemesia, Niceoppai, etc.)
 const CHAPTER_CONTAINER_SELECTORS = [
@@ -117,21 +118,23 @@ function extractSeriesSlug(urlStr: string): string {
 
 async function queryReadRealmBook(bookId: string): Promise<number | null> {
   // 1. Primary: getBookHomePage directly gives book_chapter_count accurately
+  let homeCleanup: (() => void) | null = null;
   try {
-    const homeRes = await fetch(
-      `https://api.readrealm.co/reader/book/getBookHomePage?book_type=comic&book_id=${bookId}`,
+    const homeFetched = await safeFetch(
+      `https://api.readrealm.co/reader/book/getBookHomePage?book_type=comic&book_id=${encodeURIComponent(bookId)}`,
       {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
           Accept: "application/json",
         },
-        signal: AbortSignal.timeout(8000),
+        timeoutMs: 8000,
         next: { revalidate: 0 },
       }
     );
-    if (homeRes.ok) {
-      const json = await homeRes.json();
+    homeCleanup = homeFetched.cleanup;
+    if (homeFetched.response.ok) {
+      const json = await homeFetched.response.json();
       if (
         json &&
         typeof json.book_chapter_count === "number" &&
@@ -141,22 +144,27 @@ async function queryReadRealmBook(bookId: string): Promise<number | null> {
         return json.book_chapter_count;
       }
     }
-  } catch {}
+  } catch {
+  } finally {
+    homeCleanup?.();
+  }
 
   // 2. Fallback: getListChaptersSectionPage
+  let listCleanup: (() => void) | null = null;
   try {
-    const apiUrl = `https://api.readrealm.co/reader/book/getListChaptersSectionPage?book_type=comic&book_id=${bookId}&start_index=1&sort=desc`;
-    const res = await fetch(apiUrl, {
+    const apiUrl = `https://api.readrealm.co/reader/book/getListChaptersSectionPage?book_type=comic&book_id=${encodeURIComponent(bookId)}&start_index=1&sort=desc`;
+    const fetched = await safeFetch(apiUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         Accept: "application/json",
       },
-      signal: AbortSignal.timeout(8000),
+      timeoutMs: 8000,
       next: { revalidate: 0 },
     });
-    if (res.ok) {
-      const json = await res.json();
+    listCleanup = fetched.cleanup;
+    if (fetched.response.ok) {
+      const json = await fetched.response.json();
       if (json.data && Array.isArray(json.data) && json.data.length > 0) {
         const chapters: number[] = [];
         for (const item of json.data) {
@@ -173,7 +181,10 @@ async function queryReadRealmBook(bookId: string): Promise<number | null> {
         }
       }
     }
-  } catch {}
+  } catch {
+  } finally {
+    listCleanup?.();
+  }
 
   return null;
 }
@@ -318,7 +329,7 @@ function getSeriesCandidates(urlStr: string): string[] {
     const candidates: string[] = [];
 
     // 1. Content-based platforms (WhyToon, DukeToon)
-    if (host.includes("whytoon.com") || host.includes("duketoon.com")) {
+    if (hostnameMatches(host, "whytoon.com") || hostnameMatches(host, "duketoon.com")) {
       for (const s of slugVariants) {
         candidates.push(`${u.origin}/content/${s}`);
         candidates.push(`${u.origin}/content/${s}/`);
@@ -327,7 +338,11 @@ function getSeriesCandidates(urlStr: string): string[] {
     }
 
     // 2. Root-slug platforms where /manga/ either 404s or hangs (dark-manga, niceoppai, reborntrans)
-    if (host.includes("dark-manga.com") || host.includes("niceoppai.net") || host.includes("reborntrans.com")) {
+    if (
+      hostnameMatches(host, "dark-manga.com") ||
+      hostnameMatches(host, "niceoppai.net") ||
+      hostnameMatches(host, "reborntrans.com")
+    ) {
       for (const s of slugVariants) {
         candidates.push(`${u.origin}/${s}/`);
         candidates.push(`${u.origin}/${s}`);
@@ -380,12 +395,13 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
     return true;
   };
 
-  // 0. Check embedded SSR/RSC JSON metadata (e.g. MyNovel "totalChapters":402)
+  // 0. Capture embedded SSR/RSC JSON metadata (e.g. MyNovel "totalChapters":402) as a fallback
+  let embeddedTotalChapters: number | null = null;
   const totalChaptersMatch = html.match(/\\?"totalChapters\\?"\s*:\s*(\d+)/);
   if (totalChaptersMatch && totalChaptersMatch[1]) {
     const totalNum = parseInt(totalChaptersMatch[1], 10);
     if (isReasonable(totalNum)) {
-      foundChapters.add(totalNum);
+      embeddedTotalChapters = totalNum;
     }
   }
 
@@ -536,16 +552,19 @@ function extractChaptersFromHtml(html: string, seriesSlug: string = "", currentC
     }
   });
 
+  if (foundChapters.size === 0 && embeddedTotalChapters !== null) {
+    foundChapters.add(embeddedTotalChapters);
+  }
+
   return filterChapterOutliers(Array.from(foundChapters));
 }
 
-// Fetch helper with standard browser headers and timeout covering body read
+// Fetch helper with standard browser headers, DNS check, manual redirects, and timeout covering body read
 async function fetchPageHtml(url: string, timeoutMs: number = 8000): Promise<string | null> {
   if (!isSafeExternalUrl(url)) return null;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let cleanup: (() => void) | null = null;
   try {
-    const res = await fetch(url, {
+    const fetched = await safeFetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -561,12 +580,11 @@ async function fetchPageHtml(url: string, timeoutMs: number = 8000): Promise<str
         "Sec-Fetch-User": "?1",
         "Upgrade-Insecure-Requests": "1",
       },
-      signal: controller.signal,
+      timeoutMs,
       next: { revalidate: 0 },
     });
-    if (res.url && !isSafeExternalUrl(res.url)) {
-      return null;
-    }
+    cleanup = fetched.cleanup;
+    const res = fetched.response;
     if (!res.ok) {
       console.warn(`Fetch ${url} failed with status: ${res.status}`);
       return null;
@@ -576,7 +594,7 @@ async function fetchPageHtml(url: string, timeoutMs: number = 8000): Promise<str
     console.warn(`Fetch error for ${url}:`, e?.message || e);
     return null;
   } finally {
-    clearTimeout(timeout);
+    cleanup?.();
   }
 }
 
@@ -591,7 +609,7 @@ async function resolveLatestFromTargetUrl(
   const parsedUrl = new URL(targetUrl.trim());
 
   // 1. Check specialized platforms (e.g. ReadRealm API)
-  if (parsedUrl.hostname.includes("readrealm.co")) {
+  if (hostnameMatches(parsedUrl.hostname, "readrealm.co")) {
     const rrResult = await checkReadRealm(parsedUrl.href);
     if (rrResult !== null) {
       return {
@@ -726,14 +744,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!isSafeExternalUrl(url.trim())) {
+    if (!isSafeExternalUrl(url.trim()) || !(await isSafeExternalUrlAsync(url.trim()))) {
       return NextResponse.json(
         { success: false, error: "รูปแบบ URL ไม่ถูกต้องหรือไม่อนุญาต" },
         { status: 400 }
       );
     }
 
-    const numCurrent = Number(currentChapter) || 1;
+    const parsedCurrent = Number(currentChapter);
+    const numCurrent = Number.isFinite(parsedCurrent) && parsedCurrent >= 0 ? parsedCurrent : 1;
     let result = await resolveLatestFromTargetUrl(url.trim(), numCurrent);
 
     // Automatic Fallback: If primary URL (e.g. corrupted base_url) failed or returned 0 chapters,
@@ -743,7 +762,8 @@ export async function POST(req: NextRequest) {
       typeof fallbackUrl === "string" &&
       fallbackUrl.trim() &&
       fallbackUrl.trim() !== url.trim() &&
-      isSafeExternalUrl(fallbackUrl.trim())
+      isSafeExternalUrl(fallbackUrl.trim()) &&
+      (await isSafeExternalUrlAsync(fallbackUrl.trim()))
     ) {
       result = await resolveLatestFromTargetUrl(fallbackUrl.trim(), numCurrent);
     }
@@ -756,7 +776,7 @@ export async function POST(req: NextRequest) {
         currentChapter: numCurrent,
         hasUpdate,
         totalDetectedChapters: result.totalDetectedChapters,
-        resolvedSeriesUrl: result.resolvedSeriesUrl,
+        resolvedSeriesUrl: result.resolvedSeriesUrl ? stripTrackingParams(result.resolvedSeriesUrl) : undefined,
       });
     }
 

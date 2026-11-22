@@ -24,13 +24,14 @@ import {
   Sparkles,
   Edit3,
 } from "lucide-react";
-import { computeNextChapterUrl, checkMangaOnlineUpdate, recordReadEvent, deduplicateSources } from "@/lib/storage";
+import { computeNextChapterUrl, checkMangaOnlineUpdate, recordReadEvent, deduplicateSources, isJunkSourceUrl } from "@/lib/storage";
+import { toSafeHttpUrl, stripTrackingParams } from "@/lib/ssrf";
 import { getStoredCategories, isAdultCategory } from "@/lib/categories";
 
 interface MangaDetailModalProps {
   manga: Manga | null;
   onClose: () => void;
-  onUpdate: (updated: Manga) => void;
+  onUpdate: (updated: Manga) => Promise<void> | void;
   onDelete: (id: string) => void;
   isDiscreetMode?: boolean;
 }
@@ -77,8 +78,11 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editSourceName, setEditSourceName] = useState("");
   const [editSourceUrl, setEditSourceUrl] = useState("");
+  const [editSourceOrigUrl, setEditSourceOrigUrl] = useState("");
+  const [sourceError, setSourceError] = useState("");
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   // Cover image states
   const [coverUrl, setCoverUrl] = useState(manga?.cover_url || "");
@@ -117,7 +121,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
     setCoverImgError(false);
   }, [coverUrl]);
 
-  // Synchronize state when manga prop changes
+  // Synchronize form fields when manga prop changes
   useEffect(() => {
     if (manga) {
       setTitle(manga.title || "");
@@ -131,13 +135,43 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       setTags(manga.tags || []);
       setNotes(manga.notes || "");
       setSources(manga.sources || []);
-      setEditingSourceId(null);
       setCoverUrl(manga.cover_url || "");
       setDisplayCover(manga.cover_url || "");
       setLatestChapter(manga.latest_available_chapter);
       setSearchCoverQuery(getCleanCoverSearchTitle(manga.title));
     }
   }, [manga]);
+
+  // Reset transient panel/message states when switching manga or reopening modal
+  useEffect(() => {
+    setShowCoverSearch(false);
+    setCoverResults([]);
+    setShowAddSource(false);
+    setNewSourceUrl("");
+    setNewSourceName("");
+    setNewTagInput("");
+    setUpdateCheckMsg(null);
+    setAutoFetchMsg(null);
+    setEditingSourceId(null);
+    setEditSourceName("");
+    setEditSourceUrl("");
+    setEditSourceOrigUrl("");
+    setSourceError("");
+    setSaveError("");
+    setSavedSuccess(false);
+  }, [manga?.id]);
+
+  // Escape key closes modal when not actively saving
+  useEffect(() => {
+    if (!manga) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isSaving) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [manga, isSaving, onClose]);
 
   if (!manga) return null;
 
@@ -272,12 +306,25 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
 
   // Add backup source URL
   const handleAddSource = () => {
-    if (!newSourceUrl.trim()) return;
+    const raw = newSourceUrl.trim();
+    if (!raw) return;
+
+    const safeUrl = toSafeHttpUrl(raw);
+    if (!safeUrl) {
+      setSourceError("URL ไม่ถูกต้อง กรุณาใส่ลิงก์ http:// หรือ https:// เท่านั้น");
+      return;
+    }
+    if (isJunkSourceUrl(safeUrl)) {
+      setSourceError("ไม่อนุญาตให้เพิ่มหน้าหลักของเว็บหรือเว็บที่ไม่ใช่หน้าเรื่องการ์ตูน");
+      return;
+    }
+    const cleanedUrl = stripTrackingParams(safeUrl);
+    setSourceError("");
 
     let derivedName = newSourceName.trim();
     if (!derivedName) {
       try {
-        const u = new URL(newSourceUrl);
+        const u = new URL(cleanedUrl);
         derivedName = u.hostname.replace(/^www\./, "").split(".")[0];
         derivedName = derivedName.charAt(0).toUpperCase() + derivedName.slice(1);
       } catch {
@@ -289,8 +336,8 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       id: `src-${Date.now()}`,
       manga_id: manga.id,
       site_name: derivedName,
-      base_url: newSourceUrl.trim(),
-      current_chapter_url: computeNextChapterUrl(newSourceUrl.trim(), currentChapter),
+      base_url: cleanedUrl,
+      current_chapter_url: computeNextChapterUrl(cleanedUrl, currentChapter),
       is_primary: sources.length === 0,
       is_active: true,
     };
@@ -318,8 +365,11 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
 
   // Save changes
   const handleSave = async () => {
+    if (isSaving || savedSuccess) return;
+    setSaveError("");
     setIsSaving(true);
     const prevChapter = Number(manga.current_chapter) || 0;
+    const hasChapterChanged = currentChapter !== prevChapter;
     if (currentChapter > prevChapter) {
       recordReadEvent(
         manga.id,
@@ -332,11 +382,12 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
         localStorage.setItem("mangahub_last_read_manga_id", manga.id);
       } catch {}
     }
+    const safeCover = coverUrl.trim() ? toSafeHttpUrl(coverUrl.trim()) || "" : "";
     const updated: Manga = {
       ...manga,
       title: title.trim() || manga.title,
       alt_title: altTitle.trim() || undefined,
-      cover_url: coverUrl.trim(),
+      cover_url: safeCover,
       current_chapter: currentChapter,
       latest_available_chapter: latestChapter,
       status,
@@ -345,25 +396,36 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
       tags,
       notes,
       sources: deduplicateSources(sources, manga.id),
-      last_read_at: new Date().toISOString(),
+      last_read_at: hasChapterChanged
+        ? new Date().toISOString()
+        : manga.last_read_at || manga.updated_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     try {
       await onUpdate(updated);
-    } catch (e) {
-      console.error("Save error:", e);
-    } finally {
       setIsSaving(false);
       setSavedSuccess(true);
       setTimeout(() => {
         setSavedSuccess(false);
         onClose();
       }, 500);
+    } catch (e: any) {
+      console.error("Save error:", e);
+      setIsSaving(false);
+      setSaveError(e?.message || "ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง");
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`รายละเอียด ${manga.title}`}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSaving) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
       <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col bg-[#111827] border border-[#1F2E45] rounded-3xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#1F2E45]/80 bg-[#0E1524]">
@@ -509,6 +571,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                   <option value="A">🔥 Tier A (สนุกมาก)</option>
                   <option value="B">✨ Tier B (สนุกดี)</option>
                   <option value="C">👍 Tier C (พอใช้)</option>
+                  <option value="D">📌 Tier D (อ่านฆ่าเวลา)</option>
                 </select>
 
                 <select
@@ -733,7 +796,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 setSources(updatedSources);
                 const primary = updatedSources.find((s) => s.is_primary) || updatedSources[0];
                 if (primary) {
-                  const nextUrl = primary.current_chapter_url || primary.base_url;
+                  const nextUrl = toSafeHttpUrl(primary.current_chapter_url || primary.base_url);
                   if (nextUrl) {
                     window.open(nextUrl, "_blank", "noopener,noreferrer");
                   }
@@ -909,12 +972,15 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          setSourceError("");
                           if (editingSourceId === s.id) {
                             setEditingSourceId(null);
                           } else {
+                            const origUrl = s.current_chapter_url || s.base_url;
                             setEditingSourceId(s.id);
                             setEditSourceName(s.site_name);
-                            setEditSourceUrl(s.current_chapter_url || s.base_url);
+                            setEditSourceUrl(origUrl);
+                            setEditSourceOrigUrl(origUrl);
                           }
                         }}
                         className="p-1.5 rounded-lg bg-[#182338] hover:bg-violet-600 text-gray-300 hover:text-white transition"
@@ -923,9 +989,12 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <a
-                        href={s.current_chapter_url || s.base_url}
+                        href={toSafeHttpUrl(s.current_chapter_url || s.base_url) || "#"}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => {
+                          if (!toSafeHttpUrl(s.current_chapter_url || s.base_url)) e.preventDefault();
+                        }}
                         className="p-1.5 rounded-lg bg-[#182338] hover:bg-violet-600 text-gray-300 hover:text-white transition"
                         title="ทดสอบเปิดอ่านเว็บนี้"
                       >
@@ -963,20 +1032,39 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                         type="button"
                         onClick={() => {
                           const trimmedUrl = editSourceUrl.trim();
-                          if (trimmedUrl) {
-                            setSources(
-                              sources.map((item) =>
-                                item.id === s.id
-                                  ? {
-                                      ...item,
-                                      site_name: editSourceName.trim() || item.site_name,
-                                      base_url: trimmedUrl,
-                                      current_chapter_url: computeNextChapterUrl(trimmedUrl, currentChapter),
-                                    }
-                                  : item
-                              )
-                            );
+                          if (!trimmedUrl) {
+                            setSourceError("กรุณาระบุ URL เว็บอ่าน");
+                            return;
                           }
+                          const safeUrl = toSafeHttpUrl(trimmedUrl);
+                          if (!safeUrl) {
+                            setSourceError("URL ไม่ถูกต้อง กรุณาใส่ลิงก์ http:// หรือ https:// เท่านั้น");
+                            return;
+                          }
+                          if (isJunkSourceUrl(safeUrl)) {
+                            setSourceError("ไม่อนุญาตให้บันทึกหน้าหลักของเว็บหรือเว็บที่ไม่ใช่หน้าเรื่องการ์ตูน");
+                            return;
+                          }
+                          const cleanedUrl = stripTrackingParams(safeUrl);
+                          const cleanedOrig = stripTrackingParams(toSafeHttpUrl(editSourceOrigUrl) || editSourceOrigUrl);
+                          const urlChanged = cleanedUrl !== cleanedOrig;
+                          setSourceError("");
+                          setSources(
+                            sources.map((item) =>
+                              item.id === s.id
+                                ? {
+                                    ...item,
+                                    site_name: editSourceName.trim() || item.site_name,
+                                    ...(urlChanged
+                                      ? {
+                                          base_url: cleanedUrl,
+                                          current_chapter_url: computeNextChapterUrl(cleanedUrl, currentChapter),
+                                        }
+                                      : {}),
+                                  }
+                                : item
+                            )
+                          );
                           setEditingSourceId(null);
                         }}
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0"
@@ -988,6 +1076,13 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
                 </div>
               ))}
             </div>
+
+            {sourceError && (
+              <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-950/30 border border-red-500/30 rounded-xl px-3 py-2">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{sourceError}</span>
+              </div>
+            )}
 
             {/* Add Source Form */}
             {showAddSource && (
@@ -1192,6 +1287,12 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
         </div>
 
         {/* Footer Actions */}
+        {saveError && (
+          <div className="mx-5 mb-2 flex items-center gap-1.5 text-xs text-red-400 bg-red-950/30 border border-red-500/30 rounded-xl px-3 py-2">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>{saveError}</span>
+          </div>
+        )}
         <div className="flex items-center justify-between px-5 py-4 border-t border-[#1F2E45] bg-[#0E1524]">
           <button
             onClick={() => {
@@ -1215,7 +1316,7 @@ export const MangaDetailModal: React.FC<MangaDetailModalProps> = ({
             </button>
             <button
               onClick={handleSave}
-              disabled={isSaving}
+              disabled={isSaving || savedSuccess}
               className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-60 shadow-md shadow-violet-600/30 transition active:scale-95"
             >
               {isSaving ? (

@@ -39,16 +39,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="th" className="dark">
-      <head>
-        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
-        <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
-        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="MangaHub" />
-        <meta name="mobile-web-app-capable" content="yes" />
-      </head>
       <body className="antialiased font-sans bg-[#090D16] text-gray-100">
         {children}
         <PWARegister />

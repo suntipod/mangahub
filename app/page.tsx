@@ -20,6 +20,7 @@ import {
   autoFixMissingAndBadCovers,
   computeNextChapterUrl,
   getDeletedMangaIds,
+  addDeletedMangaId,
   getLastSyncError,
   clearLastSyncError,
 } from "@/lib/storage";
@@ -28,7 +29,10 @@ import {
   saveSupabaseConfig,
   getSupabaseClient,
   fetchRemoteMangas,
+  isWithinLocalWriteWindow,
+  ensureUUID,
 } from "@/lib/supabase";
+import { toSafeHttpUrl } from "@/lib/ssrf";
 import { getStoredCategories, isAdultCategory } from "@/lib/categories";
 import { Header } from "@/components/Header";
 import { BottomNav } from "@/components/BottomNav";
@@ -82,8 +86,9 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedTier, setSelectedTier] = useState<string>("all");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
   const [lastReadMangaId, setLastReadMangaId] = useState<string | null>(null);
-  const [availableCategories, setAvailableCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [storedCategories, setStoredCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [currentTab, setCurrentTab] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "title" | "chapter">("recent");
@@ -128,21 +133,11 @@ export default function Home() {
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isRandomOpen, setIsRandomOpen] = useState(false);
 
-  // Close active modal on Escape key press
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (selectedManga) setSelectedManga(null);
-        else if (isAddOpen) setIsAddOpen(false);
-        else if (isSettingsOpen) setIsSettingsOpen(false);
-        else if (isBackupOpen) setIsBackupOpen(false);
-        else if (isStatsOpen) setIsStatsOpen(false);
-        else if (isRandomOpen) setIsRandomOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedManga, isAddOpen, isSettingsOpen, isBackupOpen, isStatsOpen, isRandomOpen]);
+  // Merge user-configured categories with any categories synced from other devices
+  const availableCategories = useMemo(() => {
+    const fromMangas = mangas.map((m) => (m.category || "").trim()).filter(Boolean);
+    return Array.from(new Set([...storedCategories, ...fromMangas]));
+  }, [storedCategories, mangas]);
 
   // Cloud Sync state
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>("syncing");
@@ -199,12 +194,7 @@ export default function Home() {
         })
         .catch(() => {
           setSyncStatus("offline");
-          // Fallback to server sync if Supabase is unreachable/blocked
-          syncWithServer().then((serverData) => {
-            if (serverData && serverData.length > 0) {
-              setMangas(serverData);
-            }
-          });
+          setMangas(getLocalMangas());
         });
     } else {
       setSyncStatus("disabled");
@@ -216,43 +206,76 @@ export default function Home() {
     }
 
     // Load custom categories
-    setAvailableCategories(getStoredCategories());
+    setStoredCategories(getStoredCategories());
   }, []);
 
-  // Supabase Realtime Subscription setup
+  // Supabase Realtime Subscription setup (mangas + manga_sources with delete handling & debounce)
   useEffect(() => {
     const client = getSupabaseClient(supabaseConfig);
     if (!client || !supabaseConfig.enabled) return;
 
-    // Listen to changes on mangas table
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleRemoteRefresh = () => {
+      if (isWithinLocalWriteWindow(2500)) return;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(async () => {
+        if (isWithinLocalWriteWindow(2500)) return;
+        try {
+          setSyncStatus("syncing");
+          const remote = await fetchRemoteMangas(client);
+          if (remote) {
+            const deletedIds = getDeletedMangaIds();
+            const validRemote = remote.filter((m) => !deletedIds.has(m.id));
+            const local = getLocalMangas();
+            const merged = deduplicateMangas([...validRemote, ...local]);
+            setMangas(merged);
+            saveLocalMangas(merged);
+          }
+          setSyncStatus("synced");
+          setLastSyncedAt(new Date());
+        } catch (e) {
+          console.error("Realtime fetch error:", e);
+          setSyncStatus("offline");
+        }
+      }, 600);
+    };
+
     const channel = client
       .channel("mangas-realtime-sync")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "mangas" },
-        async () => {
-          try {
-            setSyncStatus("syncing");
-            const remote = await fetchRemoteMangas(client);
-            if (remote && remote.length > 0) {
-              const deletedIds = getDeletedMangaIds();
-              const validRemote = remote.filter((m) => !deletedIds.has(m.id));
-              const local = getLocalMangas();
-              const merged = deduplicateMangas([...local, ...validRemote]);
-              setMangas(merged);
-              saveLocalMangas(merged);
-            }
+        (payload) => {
+          if (isWithinLocalWriteWindow(2500)) return;
+          if (payload.eventType === "DELETE" && payload.old && (payload.old as any).id) {
+            const deletedRaw = String((payload.old as any).id);
+            const deletedUuid = ensureUUID(deletedRaw);
+            addDeletedMangaId(deletedRaw);
+            addDeletedMangaId(deletedUuid);
+            const filtered = getLocalMangas().filter(
+              (m) => m.id !== deletedRaw && ensureUUID(m.id) !== deletedUuid
+            );
+            saveLocalMangas(filtered);
+            setMangas(filtered);
             setSyncStatus("synced");
             setLastSyncedAt(new Date());
-          } catch (e) {
-            console.error("Realtime fetch error:", e);
-            setSyncStatus("offline");
+            return;
           }
+          scheduleRemoteRefresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "manga_sources" },
+        () => {
+          scheduleRemoteRefresh();
         }
       )
       .subscribe();
 
     return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
       client.removeChannel(channel);
     };
   }, [supabaseConfig]);
@@ -261,7 +284,7 @@ export default function Home() {
   useEffect(() => {
     const handleOnline = () => {
       if (supabaseConfig.enabled) {
-        handleSync();
+        handleSync(supabaseConfig);
       }
     };
     const handleOffline = () => {
@@ -276,7 +299,7 @@ export default function Home() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [supabaseConfig.enabled]);
+  }, [supabaseConfig]);
 
   // Warn user before leaving if currently syncing with cloud
   useEffect(() => {
@@ -291,13 +314,19 @@ export default function Home() {
   }, [syncStatus]);
 
   // Handle Sync (syncs with primary source: Supabase or local server)
-  const handleSync = async () => {
+  const handleSync = async (overrideConfig?: SupabaseConfig) => {
+    const activeConfig = overrideConfig || supabaseConfig;
     setIsSyncing(true);
-    if (supabaseConfig.enabled) {
+    if (activeConfig.enabled) {
+      if (!activeConfig.url?.trim() || !activeConfig.anonKey?.trim()) {
+        setSyncStatus("offline");
+        setIsSyncing(false);
+        return;
+      }
       setSyncStatus("syncing");
     }
     try {
-      if (supabaseConfig.enabled) {
+      if (activeConfig.enabled) {
         const res = await syncWithSupabase();
         if (res.error) {
           setSyncStatus("offline");
@@ -315,7 +344,7 @@ export default function Home() {
       }
     } catch (e) {
       console.error("Sync error:", e);
-      if (supabaseConfig.enabled) {
+      if (activeConfig.enabled) {
         setSyncStatus("offline");
       }
     } finally {
@@ -371,7 +400,7 @@ export default function Home() {
             sources: res.updatedSources || latestFresh.sources,
             updated_at: new Date().toISOString(),
           };
-          const currentList = await upsertManga(updated);
+          const currentList = await trackSyncMutation(() => upsertManga(updated));
           setMangas(currentList);
           setSelectedManga((prev) => (prev && prev.id === updated.id ? updated : prev));
         }
@@ -409,9 +438,11 @@ export default function Home() {
     setFixCoverProgress(null);
     setUpdateNotification("🔍 กำลังค้นหาและดึงรูปปก HD สำหรับเรื่องที่ยังไม่มีปก...");
     try {
-      const res = await autoFixMissingAndBadCovers((current, total, title) => {
-        setFixCoverProgress({ current, total, title });
-      });
+      const res = await trackSyncMutation(() =>
+        autoFixMissingAndBadCovers((current, total, title) => {
+          setFixCoverProgress({ current, total, title });
+        })
+      );
       const updatedList = getLocalMangas();
       setMangas(updatedList);
       if (res.updatedCount > 0) {
@@ -461,6 +492,10 @@ export default function Home() {
 
   // Quick increment chapter (+1)
   const handleIncrementChapter = async (id: string) => {
+    setLastReadMangaId(id);
+    try {
+      localStorage.setItem("mangahub_last_read_manga_id", id);
+    } catch {}
     await trackSyncMutation(async () => {
       const updated = await incrementChapter(id);
       setMangas(updated);
@@ -470,26 +505,36 @@ export default function Home() {
   // Smart +1 & Open Next Chapter (opens tab synchronously before async await for iOS Safari)
   const handleIncrementAndOpenNext = async (manga: Manga) => {
     setLastReadMangaId(manga.id);
+    try {
+      localStorage.setItem("mangahub_last_read_manga_id", manga.id);
+    } catch {}
     const nextChapter = manga.current_chapter + 1;
     const primarySource = manga.sources?.find((s) => s.is_primary) || manga.sources?.[0];
-    const nextUrl = primarySource
+    const rawNextUrl = primarySource
       ? computeNextChapterUrl(primarySource.current_chapter_url || primarySource.base_url, nextChapter)
       : null;
+    const nextUrl = toSafeHttpUrl(rawNextUrl);
 
     if (nextUrl) {
       window.open(nextUrl, "_blank", "noopener,noreferrer");
-    } else {
-      setSelectedManga(manga);
     }
 
     await trackSyncMutation(async () => {
       const { updatedList } = await incrementAndOpenNextChapter(manga.id);
       setMangas(updatedList);
+      if (!nextUrl) {
+        const updatedManga = updatedList.find((m) => m.id === manga.id) || manga;
+        setSelectedManga(updatedManga);
+      }
     });
   };
 
   // Quick Sync to latest available chapter
   const handleSyncToLatest = async (id: string, latestChapter: number) => {
+    setLastReadMangaId(id);
+    try {
+      localStorage.setItem("mangahub_last_read_manga_id", id);
+    } catch {}
     await trackSyncMutation(async () => {
       const updated = await setChapter(id, latestChapter);
       setMangas(updated);
@@ -499,8 +544,11 @@ export default function Home() {
   // Open reader and update recently read (opens tab synchronously before async await for iOS Safari)
   const handleOpenReader = async (manga: Manga) => {
     setLastReadMangaId(manga.id);
+    try {
+      localStorage.setItem("mangahub_last_read_manga_id", manga.id);
+    } catch {}
     const primarySource = manga.sources?.find((s) => s.is_primary) || manga.sources?.[0];
-    const targetUrl = primarySource?.current_chapter_url || primarySource?.base_url;
+    const targetUrl = toSafeHttpUrl(primarySource?.current_chapter_url || primarySource?.base_url);
     if (targetUrl) {
       window.open(targetUrl, "_blank", "noopener,noreferrer");
     } else {
@@ -543,7 +591,7 @@ export default function Home() {
     saveSupabaseConfig(newConfig);
     if (newConfig.enabled) {
       setSyncStatus("syncing");
-      setTimeout(() => handleSync(), 100);
+      handleSync(newConfig);
     } else {
       setSyncStatus("disabled");
     }
@@ -592,13 +640,19 @@ export default function Home() {
         } else if (currentTab !== "all" && m.status !== currentTab) {
           return false;
         }
-        // Tag or Theme filter
+        // Custom tag exact filter
         if (selectedTag) {
-          if (!doesMangaMatchTagOrTheme(m, selectedTag)) {
+          if (!m.tags?.some((t) => t.trim() === selectedTag)) {
             return false;
           }
         }
-        // Search filter
+        // Dashboard theme keyword filter
+        if (selectedTheme) {
+          if (!doesMangaMatchTagOrTheme(m, selectedTheme)) {
+            return false;
+          }
+        }
+        // Search filter (titles, sources, tags, and notes)
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
           const matchTitle = m.title.toLowerCase().includes(q);
@@ -609,7 +663,8 @@ export default function Home() {
               s.base_url.toLowerCase().includes(q)
           );
           const matchTags = m.tags?.some((t) => t.toLowerCase().includes(q));
-          if (!matchTitle && !matchAlt && !matchSources && !matchTags) return false;
+          const matchNotes = m.notes?.toLowerCase().includes(q);
+          if (!matchTitle && !matchAlt && !matchSources && !matchTags && !matchNotes) return false;
         }
         return true;
       })
@@ -633,7 +688,7 @@ export default function Home() {
         }
         return 0;
       });
-  }, [mangas, selectedCategory, selectedTier, selectedTag, currentTab, searchQuery, sortBy]);
+  }, [mangas, selectedCategory, selectedTier, selectedTag, selectedTheme, currentTab, searchQuery, sortBy]);
 
   // Counts for status tabs (respecting selectedCategory)
   const categoryScopedMangas = useMemo(() => {
@@ -670,7 +725,7 @@ export default function Home() {
   }, [categoryScopedMangas]);
 
   const tierCounts = useMemo(() => {
-    const counts = { all: 0, S: 0, A: 0, B: 0, C: 0, none: 0 };
+    const counts = { all: 0, S: 0, A: 0, B: 0, C: 0, D: 0, none: 0 };
     for (const m of categoryScopedMangas) {
       counts.all++;
       const t = m.tier || "none";
@@ -678,6 +733,7 @@ export default function Home() {
       else if (t === "A") counts.A++;
       else if (t === "B") counts.B++;
       else if (t === "C") counts.C++;
+      else if (t === "D") counts.D++;
       else counts.none++;
     }
     return counts;
@@ -686,6 +742,7 @@ export default function Home() {
   const hasActiveFilters =
     Boolean(searchQuery.trim()) ||
     Boolean(selectedTag) ||
+    Boolean(selectedTheme) ||
     selectedCategory !== "all" ||
     selectedTier !== "all" ||
     currentTab !== "all";
@@ -693,6 +750,7 @@ export default function Home() {
   const handleResetFilters = () => {
     setSearchQuery("");
     setSelectedTag(null);
+    setSelectedTheme(null);
     setSelectedCategory("all");
     setSelectedTier("all");
     setCurrentTab("all");
@@ -707,7 +765,7 @@ export default function Home() {
         mangasCount={mangas.length}
         lastSyncedAt={lastSyncedAt}
         isSyncing={isSyncing}
-        onSync={handleSync}
+        onSync={() => handleSync()}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenBackup={() => setIsBackupOpen(true)}
         onOpenInstallPwa={() => window.dispatchEvent(new CustomEvent("mangahub-open-install-pwa"))}
@@ -903,7 +961,9 @@ export default function Home() {
                           ? "bg-orange-500 text-white shadow-orange-500/30"
                           : recentlyReadManga.tier === "B"
                           ? "bg-sky-500 text-white shadow-sky-500/30"
-                          : "bg-emerald-600 text-white shadow-emerald-600/30"
+                          : recentlyReadManga.tier === "C"
+                          ? "bg-emerald-600 text-white shadow-emerald-600/30"
+                          : "bg-slate-600 text-white shadow-slate-600/30"
                       }`}
                     >
                       {recentlyReadManga.tier === "S"
@@ -912,7 +972,9 @@ export default function Home() {
                         ? "🔥 Tier A"
                         : recentlyReadManga.tier === "B"
                         ? "✨ Tier B"
-                        : "👍 Tier C"}
+                        : recentlyReadManga.tier === "C"
+                        ? "👍 Tier C"
+                        : "📌 Tier D"}
                     </span>
                   )}
                   {recentlyReadManga.category && (
@@ -996,8 +1058,7 @@ export default function Home() {
           mangas={mangas}
           onOpenStats={() => setIsStatsOpen(true)}
           onOpenReader={handleOpenReader}
-          onTagClick={(tag) => setSelectedTag(selectedTag === tag ? null : tag)}
-          onCategoryClick={(cat) => setSelectedCategory(cat)}
+          onThemeClick={(theme) => setSelectedTheme((prev) => (prev === theme ? null : theme))}
         />
 
         {/* Category & Tier Filter Toolbar */}
@@ -1117,6 +1178,18 @@ export default function Home() {
             </button>
 
             <button
+              onClick={() => setSelectedTier("D")}
+              className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+                selectedTier === "D"
+                  ? "bg-slate-600 text-white shadow-md shadow-slate-600/30 font-black"
+                  : "bg-slate-900/50 text-slate-300 hover:bg-slate-800/70 border border-slate-600/40"
+              }`}
+            >
+              <span>📌 Tier D</span>
+              <span className="text-[10px] opacity-85">({tierCounts.D})</span>
+            </button>
+
+            <button
               onClick={() => setSelectedTier("none")}
               className={`min-h-[34px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
                 selectedTier === "none"
@@ -1129,15 +1202,26 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Tag Filter Bar */}
-          {(allTags.length > 0 || selectedTag) && (
+          {/* Tag & Theme Filter Bar */}
+          {(allTags.length > 0 || selectedTag || selectedTheme) && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none pt-0.5">
               <span className="text-[11px] font-bold text-slate-300 shrink-0 mr-1 flex items-center gap-1">
                 <Tag className="w-3 h-3 text-violet-400" />
                 <span>แท็ก:</span>
               </span>
 
-              {selectedTag && (
+              {selectedTheme && (
+                <button
+                  onClick={() => setSelectedTheme(null)}
+                  className="bg-amber-600 text-white text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md shadow-amber-600/30 shrink-0 animate-fade-in"
+                  title="คลิกเพื่อล้างตัวกรองแนวฮิต"
+                >
+                  <span>🎯 แนว: {selectedTheme}</span>
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+
+              {selectedTag && !allTags.some((item) => item.tag === selectedTag) && (
                 <button
                   onClick={() => setSelectedTag(null)}
                   className="bg-violet-600 text-white text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md shadow-violet-600/30 shrink-0 animate-fade-in"
@@ -1358,28 +1442,14 @@ export default function Home() {
               <p className="text-xs text-slate-300 max-w-sm mt-1">
                 {currentTab === "has_update"
                   ? "คุณอ่านทันทุกตอนแล้ว! กดปุ่มด้านล่างเพื่อตรวจหาตอนใหม่ล่าสุดจากเว็บอ่านการ์ตูน"
+                  : selectedTheme
+                  ? `ไม่มีเรื่องที่ตรงกับแนว "${selectedTheme}" ลองกดล้างตัวกรองด้านล่าง`
                   : selectedTag
                   ? `ไม่มีเรื่องที่ติดแท็ก #${selectedTag} ลองคลิกแท็กอื่น หรือกดปุ่มด้านล่างเพื่อล้างแท็ก`
                   : searchQuery
                   ? `ไม่พบเรื่องที่ตรงกับ "${searchQuery}" ลองค้นหาด้วยคำอื่น หรือล้างคำค้นหา`
                   : "เริ่มต้นโดยการกดปุ่ม 'กู้ชีพแท็บ' เพื่อวางลิงก์จากแท็บการ์ตูนที่คุณกำลังอ่านอยู่ได้เลย"}
               </p>
-              {currentTab === "has_update" && (
-                <div className="pt-3">
-                  <button
-                    onClick={handleCheckAllUpdates}
-                    disabled={isCheckingUpdates}
-                    className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/30 transition active:scale-95"
-                  >
-                    <Flame className="w-4 h-4 fill-current" />
-                    <span>
-                      {isCheckingUpdates && checkProgress
-                        ? `กำลังตรวจ ${checkProgress.current}/${checkProgress.total}...`
-                        : "ตรวจหาตอนใหม่ออนไลน์ทันที"}
-                    </span>
-                  </button>
-                </div>
-              )}
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2">
               {hasActiveFilters && (
@@ -1394,10 +1464,14 @@ export default function Home() {
                 <button
                   onClick={handleCheckAllUpdates}
                   disabled={isCheckingUpdates}
-                  className="flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/30 transition"
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/30 transition disabled:opacity-60"
                 >
-                  <Flame className="w-4 h-4" />
-                  <span>ตรวจหาตอนใหม่อีกครั้ง</span>
+                  <Flame className="w-4 h-4 fill-current" />
+                  <span>
+                    {isCheckingUpdates && checkProgress
+                      ? `กำลังตรวจ ${checkProgress.current}/${checkProgress.total}...`
+                      : "ตรวจหาตอนใหม่ออนไลน์ทันที"}
+                  </span>
                 </button>
               ) : (
                 <button
@@ -1418,7 +1492,6 @@ export default function Home() {
         currentTab={currentTab}
         onTabChange={(tab) => setCurrentTab(tab)}
         onOpenAdd={() => setIsAddOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRandom={() => setIsRandomOpen(true)}
         onOpenStats={() => setIsStatsOpen(true)}
         unreadCount={updatesCount}
@@ -1446,7 +1519,19 @@ export default function Home() {
         config={supabaseConfig}
         onSaveConfig={handleSaveConfig}
         onDataImported={() => setMangas(getLocalMangas())}
-        onCategoriesChanged={() => setAvailableCategories(getStoredCategories())}
+        onCategoriesChanged={() => {
+          const nextStored = getStoredCategories();
+          setStoredCategories(nextStored);
+          if (selectedCategory !== "all") {
+            const mergedCats = new Set([
+              ...nextStored,
+              ...mangas.map((m) => (m.category || "").trim()).filter(Boolean),
+            ]);
+            if (!nextStored.includes(selectedCategory) || !mergedCats.has(selectedCategory)) {
+              setSelectedCategory("all");
+            }
+          }
+        }}
         onOpenBackup={() => setIsBackupOpen(true)}
         onOpenInstallPwa={() => {
           setIsSettingsOpen(false);
@@ -1459,12 +1544,14 @@ export default function Home() {
         onClose={() => setIsBackupOpen(false)}
         mangas={mangas}
         supabaseEnabled={supabaseConfig.enabled}
-        onDataRestored={() => {
+        onDataRestored={(meta) => {
           setMangas(getLocalMangas());
-          setAvailableCategories(getStoredCategories());
-          if (supabaseConfig.enabled) {
+          setStoredCategories(getStoredCategories());
+          if (meta?.syncedToCloud && !meta.syncError) {
             setSyncStatus("synced");
             setLastSyncedAt(new Date());
+          } else if (supabaseConfig.enabled && meta?.syncError) {
+            setSyncStatus("offline");
           }
         }}
       />

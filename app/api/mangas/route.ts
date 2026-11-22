@@ -4,6 +4,7 @@ import path from "path";
 import os from "os";
 import { Manga } from "@/types/manga";
 import { deduplicateMangas, isJunkManga } from "@/lib/storage";
+import { ensureUUID } from "@/lib/supabase";
 
 const DATA_DIR = process.env.VERCEL
   ? path.join(os.tmpdir(), "mangahub-data")
@@ -18,7 +19,7 @@ function readServerData(): Manga[] {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         memoryCache = deduplicateMangas(parsed);
         return memoryCache;
       }
@@ -129,8 +130,9 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Missing manga ID" }, { status: 400 });
     }
 
+    const targetUuid = ensureUUID(id);
     const current = readServerData();
-    const filtered = current.filter((m) => m.id !== id);
+    const filtered = current.filter((m) => m.id !== id && ensureUUID(m.id) !== targetUuid);
     writeServerData(filtered);
 
     return NextResponse.json({ success: true, data: filtered });

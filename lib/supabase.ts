@@ -33,6 +33,16 @@ export function ensureUUID(id: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
+let lastLocalWriteAt = 0;
+
+export function markLocalWriteTimestamp(): void {
+  lastLocalWriteAt = Date.now();
+}
+
+export function isWithinLocalWriteWindow(windowMs: number = 2500): boolean {
+  return Date.now() - lastLocalWriteAt < windowMs;
+}
+
 export function loadSupabaseConfig(): SupabaseConfig {
   if (typeof window === "undefined") {
     return DEFAULT_SUPABASE_CONFIG;
@@ -41,8 +51,17 @@ export function loadSupabaseConfig(): SupabaseConfig {
     const raw = localStorage.getItem(CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed.url && parsed.anonKey) {
-        return parsed;
+      if (parsed && typeof parsed === "object") {
+        if (parsed.enabled === false) {
+          return {
+            url: typeof parsed.url === "string" ? parsed.url : "",
+            anonKey: typeof parsed.anonKey === "string" ? parsed.anonKey : "",
+            enabled: false,
+          };
+        }
+        if (parsed.url && parsed.anonKey) {
+          return parsed;
+        }
       }
     }
   } catch (e) {
@@ -277,26 +296,45 @@ async function doSyncMangaToRemote(client: SupabaseClient, manga: Manga, mangaId
       };
     });
 
-    // 1. Upsert current sources first (atomic, never leaves manga with 0 sources during rapid clicks)
-    const { error: sError } = await client.from("manga_sources").upsert(sourcesToUpsert, { onConflict: "id" });
-    if (sError) throw sError;
-
-    // 2. Delete only removed sources for this mangaId
     const keepIds = new Set(sourcesToUpsert.map((s) => s.id));
-    const { data: existingSources } = await client
+    const targetPrimaryRow = sourcesToUpsert.find((s) => s.is_primary);
+
+    // 1. Fetch existing sources first so deletions & primary demotion never collide with idx_manga_sources_one_primary
+    const { data: existingSources, error: fetchSrcErr } = await client
       .from("manga_sources")
-      .select("id")
+      .select("id, is_primary")
       .eq("manga_id", mangaId);
+    if (fetchSrcErr) throw fetchSrcErr;
 
     const toDeleteIds = (existingSources || [])
       .map((s: any) => s.id)
       .filter((id: string) => !keepIds.has(id));
 
     if (toDeleteIds.length > 0) {
-      await client.from("manga_sources").delete().in("id", toDeleteIds);
+      const { error: delErr } = await client.from("manga_sources").delete().in("id", toDeleteIds);
+      if (delErr) throw delErr;
     }
+
+    // 2. If another remaining source currently holds is_primary=true, demote it before promoting the new primary
+    const existingOtherPrimary = (existingSources || []).some(
+      (s: any) => s.is_primary && keepIds.has(s.id) && s.id !== targetPrimaryRow?.id
+    );
+    if (existingOtherPrimary) {
+      const { error: demoteErr } = await client
+        .from("manga_sources")
+        .update({ is_primary: false })
+        .eq("manga_id", mangaId)
+        .eq("is_primary", true);
+      if (demoteErr) throw demoteErr;
+    }
+
+    // 3. Upsert with non-primary sources ordered before the single primary source
+    const orderedSources = [...sourcesToUpsert].sort((a, b) => Number(a.is_primary) - Number(b.is_primary));
+    const { error: sError } = await client.from("manga_sources").upsert(orderedSources, { onConflict: "id" });
+    if (sError) throw sError;
   } else {
-    await client.from("manga_sources").delete().eq("manga_id", mangaId);
+    const { error: delAllErr } = await client.from("manga_sources").delete().eq("manga_id", mangaId);
+    if (delAllErr) throw delAllErr;
   }
 }
 
@@ -310,9 +348,12 @@ export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): P
     .catch(() => {})
     .then(async () => {
       try {
+        markLocalWriteTimestamp();
         await doSyncMangaToRemote(client, manga, mangaId);
       } catch (err) {
         syncError = err;
+      } finally {
+        markLocalWriteTimestamp();
       }
     });
 
@@ -329,6 +370,8 @@ export async function syncMangaToRemote(client: SupabaseClient, manga: Manga): P
 // Delete manga from Supabase
 export async function deleteRemoteManga(client: SupabaseClient, mangaId: string): Promise<void> {
   const cleanId = ensureUUID(mangaId);
+  markLocalWriteTimestamp();
   const { error } = await client.from("mangas").delete().eq("id", cleanId);
+  markLocalWriteTimestamp();
   if (error) throw error;
 }

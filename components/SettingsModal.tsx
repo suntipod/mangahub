@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { testSupabaseConnection } from "@/lib/supabase";
+import { toSafeHttpUrl } from "@/lib/ssrf";
 import {
   getLocalMangas,
   saveLocalMangas,
@@ -90,8 +91,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setAnonKey(config.anonKey || "");
       setEnabled(Boolean(config.enabled));
       setCategories(getStoredCategories());
+      setTestResult(null);
     }
   }, [isOpen, config.url, config.anonKey, config.enabled]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -154,9 +165,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleSave = () => {
+    const trimmedUrl = url.trim();
+    const trimmedKey = anonKey.trim();
+    if (enabled) {
+      const safeUrl = toSafeHttpUrl(trimmedUrl);
+      if (!safeUrl || !trimmedKey) {
+        setTestResult({
+          success: false,
+          message: "กรุณาระบุ Supabase Project URL (https://...) และ Anon Key ให้ครบถ้วนก่อนเปิดใช้งาน Cloud Sync",
+        });
+        return;
+      }
+    }
     onSaveConfig({
-      url: url.trim(),
-      anonKey: anonKey.trim(),
+      url: trimmedUrl,
+      anonKey: trimmedKey,
       enabled,
     });
     onClose();
@@ -195,11 +218,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const blob = new Blob([JSON.stringify(backup, null, 2)], {
       type: "application/json",
     });
+    const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    a.href = objectUrl;
     a.download = `mangahub-backup-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
-    URL.revokeObjectURL(a.href);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   };
 
   // Import JSON backup (supports both { mangas: [...] } and [...] formats)
@@ -225,14 +249,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             alert("ไม่พบข้อมูลมังงะที่ถูกต้องในไฟล์");
             return;
           }
-          await restoreBackupData(parsed, {
+          const res = await restoreBackupData(parsed, {
             mode: "merge",
-            syncSupabase: enabled,
+            syncSupabase: enabled && Boolean(url.trim() && anonKey.trim()),
           });
+          if (!res.success) {
+            alert(res.error || "เกิดข้อผิดพลาดในการกู้คืนข้อมูล");
+            return;
+          }
           setCategories(getStoredCategories());
           onCategoriesChanged?.();
           onDataImported();
-          alert(`นำเข้าข้อมูลมังงะสำเร็จจำนวน ${normalized.length} เรื่อง!`);
+          if (res.syncError) {
+            alert(`นำเข้าข้อมูลในเครื่องสำเร็จจำนวน ${res.count} เรื่อง (ซิงค์ Cloud ยังไม่สำเร็จ: ${res.syncError})`);
+          } else {
+            alert(`นำเข้าข้อมูลมังงะสำเร็จจำนวน ${res.count} เรื่อง!`);
+          }
         } else {
           alert("รูปแบบไฟล์ไม่ถูกต้อง");
         }
@@ -244,7 +276,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="ตั้งค่าระบบและ Cloud Sync"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
       <div className="relative w-full max-w-xl max-h-[92vh] flex flex-col bg-[#111827] border border-[#1F2E45] rounded-3xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#1F2E45]/80 bg-[#0E1524]">
@@ -614,6 +654,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Footer Actions */}
+        {testResult && !testResult.success && (
+          <div className="mx-5 mb-2 flex items-center gap-2 p-2.5 rounded-xl bg-red-950/40 border border-red-500/40 text-xs text-red-300">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+            <span>{testResult.message}</span>
+          </div>
+        )}
         <div className="flex items-center justify-between px-5 py-4 border-t border-[#1F2E45] bg-[#0E1524]">
           <button
             onClick={onClose}

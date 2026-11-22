@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect } from "react";
 import { Manga } from "@/types/manga";
 import { getReadLogs } from "@/lib/storage";
 import { isAdultCategory } from "@/lib/categories";
@@ -130,13 +130,14 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
     }
 
     // 5. Tier Breakdown
-    const tierCounts = { S: 0, A: 0, B: 0, C: 0, none: 0 };
+    const tierCounts = { S: 0, A: 0, B: 0, C: 0, D: 0, none: 0 };
     for (const m of mangas) {
       const t = m.tier || "none";
       if (t === "S") tierCounts.S++;
       else if (t === "A") tierCounts.A++;
       else if (t === "B") tierCounts.B++;
       else if (t === "C") tierCounts.C++;
+      else if (t === "D") tierCounts.D++;
       else tierCounts.none++;
     }
 
@@ -167,10 +168,27 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
     };
   }, [isOpen, mangas]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="สถิติการอ่านส่วนตัว"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto"
+    >
       <div className="relative w-full max-w-2xl bg-[#0D1322] border border-violet-500/30 rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="relative px-5 py-4 border-b border-[#1F2E45] bg-gradient-to-r from-violet-950/40 via-[#101726] to-[#0D1322] flex items-center justify-between shrink-0">
@@ -307,7 +325,9 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="bg-amber-400 text-black text-[9px] font-black px-1.5 py-0.5 rounded shadow">
-                          👑 เรื่องที่อ่านไปมากที่สุด
+                          {stats.maxOpens > 0
+                            ? `👑 เรื่องที่เปิดอ่านบ่อยที่สุด (${stats.maxOpens} ครั้ง)`
+                            : "👑 เรื่องที่ตอนเยอะที่สุด"}
                         </span>
                         {stats.mostOpenedManga.tier && stats.mostOpenedManga.tier !== "none" && (
                           <span className="text-[9px] font-bold text-amber-300 bg-amber-950/50 px-1 rounded border border-amber-600/30">
@@ -417,7 +437,7 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                   <Award className="w-3.5 h-3.5 text-amber-400" />
                   <span>สัดส่วน Tier & สถานะการอ่าน</span>
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   <div className="bg-amber-950/20 border border-amber-600/30 rounded-xl p-2.5 text-center">
                     <span className="text-xs font-bold text-amber-300">👑 Tier S</span>
                     <div className="text-lg font-black text-white mt-0.5">{stats.tierCounts.S} เรื่อง</div>
@@ -433,6 +453,10 @@ export const ReadingStatsModal: React.FC<ReadingStatsModalProps> = ({
                   <div className="bg-emerald-950/20 border border-emerald-600/30 rounded-xl p-2.5 text-center">
                     <span className="text-xs font-bold text-emerald-300">👍 Tier C</span>
                     <div className="text-lg font-black text-white mt-0.5">{stats.tierCounts.C} เรื่อง</div>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-600/30 rounded-xl p-2.5 text-center col-span-2 sm:col-span-1">
+                    <span className="text-xs font-bold text-slate-300">📌 Tier D</span>
+                    <div className="text-lg font-black text-white mt-0.5">{stats.tierCounts.D} เรื่อง</div>
                   </div>
                 </div>
               </div>

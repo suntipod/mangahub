@@ -3,7 +3,8 @@
 import React, { useState } from "react";
 import { Manga, MangaSource, TierRating } from "@/types/manga";
 import { getStoredCategories, isAdultCategory } from "@/lib/categories";
-import { deduplicateMangas, deduplicateSources, normalizeSourceUrl } from "@/lib/storage";
+import { deduplicateMangas, deduplicateSources, normalizeSourceUrl, isJunkSourceUrl } from "@/lib/storage";
+import { hostnameMatches, stripTrackingParams, toSafeHttpUrl } from "@/lib/ssrf";
 import {
   X,
   Sparkles,
@@ -27,8 +28,8 @@ import {
 interface AddMangaModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddManga: (newManga: Manga) => void;
-  onAddMangas?: (newMangas: Manga[]) => void;
+  onAddManga: (newManga: Manga) => Promise<void> | void;
+  onAddMangas?: (newMangas: Manga[]) => Promise<void> | void;
 }
 
 interface BatchItem {
@@ -119,15 +120,20 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
       if (!urlMatch) continue;
       itemUrl = urlMatch[1].trim();
 
-      // Check if text exists before or after the URL
+      // Check if text exists before or after the URL (ignore standalone Thai/English chapter labels like "ตอนที่ 155")
       const textOutside = line.replace(itemUrl, "").replace(/[\[\]\(\)]/g, "").trim();
-      if (textOutside.length > 2 && /[^\x00-\x7F\d\s]/.test(textOutside)) {
+      const isChapterOnlyText = /^(?:ตอนที่|ตอน|บทที่|ep\.?|ch\.?|chapter)\s*[\d.\-:]+$/i.test(textOutside);
+      if (textOutside.length > 2 && !isChapterOnlyText && /[^\x00-\x7F\d\s]/.test(textOutside)) {
         userTitle = textOutside;
       }
     }
 
-    const normUrlKey = normalizeSourceUrl(itemUrl) || itemUrl;
-    if (!itemUrl || seen.has(normUrlKey)) continue;
+    const safeItemUrl = toSafeHttpUrl(itemUrl);
+    if (!safeItemUrl) continue;
+    const cleanedItemUrl = stripTrackingParams(safeItemUrl);
+
+    const normUrlKey = normalizeSourceUrl(cleanedItemUrl) || cleanedItemUrl;
+    if (!cleanedItemUrl || seen.has(normUrlKey)) continue;
     seen.add(normUrlKey);
 
     // Extract chapter from userTitle or line text if present
@@ -155,7 +161,7 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
 
     // C. Or auto-extract chapter from URL (with decodeURIComponent, query stripping, leading/trailing slug numbers)
     if (!chFound) {
-      const ch = extractChapterFromUrlOrText(itemUrl);
+      const ch = extractChapterFromUrlOrText(cleanedItemUrl);
       if (ch) {
         chapter = ch;
         chFound = true;
@@ -164,13 +170,15 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
 
     let siteName = "เว็บอ่าน";
     try {
-      const u = new URL(itemUrl);
+      const u = new URL(cleanedItemUrl);
 
-      // Filter out non-manga URLs (homepages, top-up, search, self app)
+      // Filter out non-manga URLs (homepages, top-up, search, junk domains, self app)
       if (
-        (u.pathname === "/" || u.pathname === "") ||
+        (u.pathname === "/" && !u.searchParams.has("q")) ||
+        u.pathname === "" ||
+        isJunkSourceUrl(cleanedItemUrl) ||
         /^\/(?:topup|search|comics|manga|page\/\d+)\/?$/i.test(u.pathname) ||
-        u.hostname.includes("vercel.app")
+        hostnameMatches(u.hostname, "vercel.app")
       ) {
         continue;
       }
@@ -179,11 +187,13 @@ function parseLinesToBatchItems(text: string): BatchItem[] {
       if (u.hostname.includes("google.") && u.searchParams.has("q")) {
         siteName = "Google ค้นหา";
       }
-    } catch {}
+    } catch {
+      continue;
+    }
 
     items.push({
       id: `item-${i}-${Date.now()}`,
-      url: itemUrl,
+      url: cleanedItemUrl,
       chapter,
       siteName,
       userTitle: userTitle || undefined,
@@ -227,8 +237,9 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, percent: 0 });
   const [batchResults, setBatchResults] = useState<
-    Array<{ url: string; title: string; chapter: number; coverUrl: string; status: "success" | "fallback" }>
+    Array<{ url: string; title: string; chapter: number; coverUrl: string; status: "success" | "fallback" | "skipped"; reason?: string }>
   >([]);
+  const [batchSavedCount, setBatchSavedCount] = useState(0);
   const [batchFinished, setBatchFinished] = useState(false);
   const [batchError, setBatchError] = useState("");
 
@@ -239,8 +250,28 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       setAvailableCategories(getStoredCategories());
+      setErrorMsg("");
+      setWarningMsg("");
+      setAddedSuccess(false);
+      setBatchError("");
+      if (!isBatchRunning) {
+        setBatchFinished(false);
+        setBatchSavedCount(0);
+        setBatchResults([]);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, isBatchRunning]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isBatchRunning && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isBatchRunning, loading, onClose]);
 
   React.useEffect(() => {
     setTriedCoverProxy(false);
@@ -271,11 +302,18 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 
   // Auto-scrape single URL (supports direct URL parameter from clipboard)
   const handleScrape = async (overrideUrl?: string, overrideTitle?: string, overrideChapter?: number | null) => {
-    const targetUrl = (overrideUrl !== undefined ? overrideUrl : url).trim();
-    if (!targetUrl) {
+    const rawTargetUrl = (overrideUrl !== undefined ? overrideUrl : url).trim();
+    if (!rawTargetUrl) {
       setErrorMsg("กรุณาวาง URL หน้าเรื่องการ์ตูนก่อนครับ");
       return;
     }
+
+    const safeTargetUrl = toSafeHttpUrl(rawTargetUrl);
+    if (!safeTargetUrl) {
+      setErrorMsg("URL ไม่ถูกต้อง กรุณาระบุลิงก์ http:// หรือ https:// เท่านั้นครับ");
+      return;
+    }
+    const targetUrl = stripTrackingParams(safeTargetUrl);
 
     setLoading(true);
     setErrorMsg("");
@@ -352,7 +390,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
         const urlMatch = clipText.match(/(https?:\/\/[^\s,\]\)]+)/i);
         targetUrl = urlMatch ? urlMatch[1].trim() : clipText.trim();
         const textOutside = clipText.replace(targetUrl, "").replace(/[\[\]\(\)]/g, "").trim();
-        if (textOutside.length > 2 && /[^\x00-\x7F\d\s]/.test(textOutside)) {
+        const isChapterOnlyText = /^(?:ตอนที่|ตอน|บทที่|ep\.?|ch\.?|chapter)\s*[\d.\-:]+$/i.test(textOutside);
+        if (textOutside.length > 2 && !isChapterOnlyText && /[^\x00-\x7F\d\s]/.test(textOutside)) {
           userProvidedTitle = textOutside;
         }
       }
@@ -405,38 +444,62 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
   };
 
   // Submit and save single manga
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (addedSuccess) return;
     if (!title.trim()) {
       setErrorMsg("กรุณาระบุชื่อเรื่องการ์ตูน");
       return;
     }
 
+    const rawUrl = url.trim();
+    let safeChapterUrl = "";
+    if (rawUrl) {
+      const safe = toSafeHttpUrl(rawUrl);
+      if (!safe) {
+        setErrorMsg("URL ลิงก์อ่านไม่ถูกต้อง กรุณาใช้ลิงก์ http:// หรือ https://");
+        return;
+      }
+      if (isJunkSourceUrl(safe)) {
+        setErrorMsg("ลิงก์นี้เป็นหน้าหลักเว็บหรือลิงก์ต้องห้าม กรุณาวางลิงก์หน้าเรื่อง/ตอนอ่านจริงครับ");
+        return;
+      }
+      safeChapterUrl = stripTrackingParams(safe);
+    }
+
+    const rawSeries = seriesUrl.trim();
+    const safeSeries = rawSeries ? toSafeHttpUrl(rawSeries) : "";
+    const cleanedSeriesUrl = safeSeries && !isJunkSourceUrl(safeSeries) ? stripTrackingParams(safeSeries) : "";
+    const safeCover = coverUrl.trim() ? toSafeHttpUrl(coverUrl.trim()) || "" : "";
+
     const mangaId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `manga-${Date.now()}`;
-    const initialSource: MangaSource = {
-      id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `src-${Date.now()}`,
-      manga_id: mangaId,
-      site_name: siteName || "เว็บหลัก",
-      base_url: seriesUrl || url.trim(),
-      current_chapter_url: url.trim(),
-      is_primary: true,
-      is_active: true,
-    };
+    const hasValidSource = Boolean(safeChapterUrl || cleanedSeriesUrl);
+    const initialSource: MangaSource | null = hasValidSource
+      ? {
+          id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `src-${Date.now()}`,
+          manga_id: mangaId,
+          site_name: siteName || "เว็บหลัก",
+          base_url: cleanedSeriesUrl || safeChapterUrl,
+          current_chapter_url: safeChapterUrl || cleanedSeriesUrl,
+          is_primary: true,
+          is_active: true,
+        }
+      : null;
 
     const newManga: Manga = {
       id: mangaId,
       title: title.trim(),
-      cover_url: coverUrl.trim(),
+      cover_url: safeCover,
       current_chapter: chapter,
       status: "reading",
       tier: tier,
       category: category || "การ์ตูนทั่วไป",
-      sources: [initialSource],
+      sources: initialSource ? [initialSource] : [],
       last_read_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    onAddManga(newManga);
+    await onAddManga(newManga);
     setAddedSuccess(true);
 
     if (keepOpenForBatch) {
@@ -469,43 +532,104 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
     setIsBatchRunning(true);
     setBatchError("");
     setBatchFinished(false);
+    setBatchSavedCount(0);
     setBatchResults([]);
     setBatchProgress({ current: 0, total: batchItems.length, percent: 0 });
 
     const rescuedMangas: Manga[] = [];
-    const results: Array<{ url: string; title: string; chapter: number; coverUrl: string; status: "success" | "fallback" }> = [];
+    const results: Array<{
+      url: string;
+      title: string;
+      chapter: number;
+      coverUrl: string;
+      status: "success" | "fallback" | "skipped";
+      reason?: string;
+    }> = [];
 
     for (let i = 0; i < batchItems.length; i++) {
       const item = batchItems[i];
+      const safeItemUrl = toSafeHttpUrl(item.url);
+      if (!safeItemUrl || isJunkSourceUrl(safeItemUrl)) {
+        results.push({
+          url: item.url,
+          title: item.url,
+          chapter: item.chapter,
+          coverUrl: "",
+          status: "skipped",
+          reason: "ลิงก์หน้าหลัก เว็บขายของ หรือ URL ไม่ถูกต้อง",
+        });
+        setBatchResults([...results]);
+        const current = i + 1;
+        setBatchProgress({
+          current,
+          total: batchItems.length,
+          percent: Math.round((current / batchItems.length) * 100),
+        });
+        continue;
+      }
+
+      const cleanedItemUrl = stripTrackingParams(safeItemUrl);
       let scrapedTitle = "";
       let scrapedCover = "";
       let chosenChapter = item.chapter; // Use user-specified or auto-parsed chapter!
       let scrapedSite = item.siteName || "เว็บอ่าน";
-      let scrapedSeriesUrl = item.url;
-      let status: "success" | "fallback" = "fallback";
+      let scrapedSeriesUrl = cleanedItemUrl;
+      let status: "success" | "fallback" | "skipped" = "fallback";
+      let shouldSkip = false;
+      let skipReason = "";
 
       try {
         const res = await fetch("/api/scrape", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: item.url, providedTitle: item.userTitle }),
+          body: JSON.stringify({ url: cleanedItemUrl, providedTitle: item.userTitle }),
         });
 
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && json.data) {
-            scrapedTitle = json.data.title || "";
-            scrapedCover = json.data.cover_url || "";
-            if (item.chapter === 1 && (json.data.detected_chapter || (json.data.current_chapter && json.data.current_chapter > 1))) {
-              chosenChapter = json.data.detected_chapter || json.data.current_chapter;
-            }
-            if (json.data.site_name) scrapedSite = json.data.site_name;
-            if (json.data.series_url) scrapedSeriesUrl = json.data.series_url;
-            if (scrapedTitle) status = "success";
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.success) {
+          if ((res.status >= 400 && res.status < 500) || (json && json.success === false)) {
+            shouldSkip = true;
+            skipReason = json?.error || `HTTP ${res.status} — ไม่สามารถดึงข้อมูลหน้านี้ได้`;
           }
+        } else if (json.data) {
+          scrapedTitle = json.data.title || "";
+          scrapedCover = json.data.cover_url ? toSafeHttpUrl(json.data.cover_url) || "" : "";
+          if (item.chapter === 1 && (json.data.detected_chapter || (json.data.current_chapter && json.data.current_chapter > 1))) {
+            chosenChapter = json.data.detected_chapter || json.data.current_chapter;
+          }
+          if (json.data.site_name) scrapedSite = json.data.site_name;
+          if (json.data.series_url) {
+            const safeSeries = toSafeHttpUrl(json.data.series_url);
+            if (safeSeries && !isJunkSourceUrl(safeSeries)) {
+              scrapedSeriesUrl = stripTrackingParams(safeSeries);
+            }
+          }
+          if (scrapedTitle) status = "success";
         }
       } catch (err) {
-        // Fallback gracefully without stopping
+        // Fallback gracefully without stopping on transient network errors
+      }
+
+      if (shouldSkip) {
+        results.push({
+          url: cleanedItemUrl,
+          title: item.userTitle || cleanedItemUrl,
+          chapter: chosenChapter,
+          coverUrl: "",
+          status: "skipped",
+          reason: skipReason,
+        });
+        setBatchResults([...results]);
+        const current = i + 1;
+        setBatchProgress({
+          current,
+          total: batchItems.length,
+          percent: Math.round((current / batchItems.length) * 100),
+        });
+        if (i < batchItems.length - 1) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        continue;
       }
 
       // Clean up title in case any stray slashes or hashes were returned
@@ -519,7 +643,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
           scrapedTitle = item.userTitle.trim();
         } else {
           try {
-            const parsed = new URL(item.url);
+            const parsed = new URL(cleanedItemUrl);
             const segments = parsed.pathname.split("/").filter(Boolean);
             const slug =
               segments.filter(
@@ -564,8 +688,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
               id: sourceId,
               manga_id: mangaId,
               site_name: scrapedSite,
-              base_url: scrapedSeriesUrl || item.url,
-              current_chapter_url: item.url,
+              base_url: scrapedSeriesUrl || cleanedItemUrl,
+              current_chapter_url: cleanedItemUrl,
               is_primary: true,
               is_active: true,
             },
@@ -579,7 +703,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
 
       rescuedMangas.push(newManga);
       results.push({
-        url: item.url,
+        url: cleanedItemUrl,
         title: scrapedTitle,
         chapter: chosenChapter,
         coverUrl: scrapedCover,
@@ -600,21 +724,34 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
       }
     }
 
-    const dedupedBatch = deduplicateMangas(rescuedMangas);
+    const dedupedBatch = rescuedMangas.length > 0 ? deduplicateMangas(rescuedMangas) : [];
 
-    // Save all to database & storage
-    if (onAddMangas) {
-      onAddMangas(dedupedBatch);
-    } else {
-      dedupedBatch.forEach((m) => onAddManga(m));
+    // Save all to database & storage (await persistence before finishing)
+    if (dedupedBatch.length > 0) {
+      if (onAddMangas) {
+        await onAddMangas(dedupedBatch);
+      } else {
+        for (const m of dedupedBatch) {
+          await onAddManga(m);
+        }
+      }
     }
 
+    setBatchSavedCount(dedupedBatch.length);
     setIsBatchRunning(false);
     setBatchFinished(true);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="เพิ่มการ์ตูนเรื่องใหม่"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isBatchRunning && !loading) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
       <div className="relative w-full max-w-xl max-h-[92vh] flex flex-col bg-[#111827] border border-[#1F2E45] rounded-3xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#1F2E45]/80 bg-[#0E1524]">
@@ -865,7 +1002,9 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                       {batchResults.map((r, idx) => (
                         <div
                           key={idx}
-                          className="flex items-center gap-3 p-2.5 bg-[#131B2E] border border-[#1F2E45] rounded-xl text-xs animate-fade-in"
+                          className={`flex items-center gap-3 p-2.5 bg-[#131B2E] border rounded-xl text-xs animate-fade-in ${
+                            r.status === "skipped" ? "border-amber-500/30 opacity-80" : "border-[#1F2E45]"
+                          }`}
                         >
                           <div className="w-8 h-10 rounded bg-[#0D1322] overflow-hidden shrink-0 border border-[#1F2E45]">
                             {r.coverUrl ? (
@@ -889,31 +1028,52 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-white truncate">{r.title}</p>
-                            <p className="text-[10px] text-violet-400 font-bold truncate">ตอนที่อ่านถึง: {r.chapter}</p>
+                            {r.status === "skipped" ? (
+                              <p className="text-[10px] text-amber-400 font-semibold truncate">{r.reason || "ข้ามรายการที่ไม่รองรับ"}</p>
+                            ) : (
+                              <p className="text-[10px] text-violet-400 font-bold truncate">ตอนที่อ่านถึง: {r.chapter}</p>
+                            )}
                           </div>
-                          <span className="text-emerald-400 shrink-0 flex items-center gap-1 font-semibold text-[11px]">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>สำเร็จ</span>
-                          </span>
+                          {r.status === "skipped" ? (
+                            <span className="text-amber-400 shrink-0 flex items-center gap-1 font-semibold text-[11px]">
+                              <AlertCircle className="w-3.5 h-3.5" />
+                              <span>ข้ามแล้ว</span>
+                            </span>
+                          ) : (
+                            <span className="text-emerald-400 shrink-0 flex items-center gap-1 font-semibold text-[11px]">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>สำเร็จ</span>
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
                   )}
                 </>
               ) : (
-                /* Batch Completed Success View */
-                <div className="text-center py-6 px-4 bg-[#141E33] border border-emerald-500/40 rounded-3xl space-y-4">
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/20">
-                    <CheckCircle2 className="w-8 h-8" />
+                /* Batch Completed View */
+                <div className={`text-center py-6 px-4 bg-[#141E33] border rounded-3xl space-y-4 ${batchSavedCount > 0 ? "border-emerald-500/40" : "border-amber-500/40"}`}>
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto shadow-lg ${batchSavedCount > 0 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-emerald-500/20" : "bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-amber-500/20"}`}>
+                    {batchSavedCount > 0 ? <CheckCircle2 className="w-8 h-8" /> : <AlertCircle className="w-8 h-8" />}
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-white">
-                      🎉 กู้ชีพแท็บสำเร็จทั้งหมด {batchResults.length} เรื่องแล้ว!
+                      {batchSavedCount > 0
+                        ? `🎉 กู้ชีพแท็บสำเร็จทั้งหมด ${batchSavedCount} เรื่องแล้ว!`
+                        : "⚠️ ไม่พบลิงก์การ์ตูนที่สามารถบันทึกได้ (ข้ามรายการที่ไม่รองรับทั้งหมด)"}
                     </h3>
                     <p className="text-xs text-gray-300 mt-1 max-w-md mx-auto">
-                      ข้อมูลทั้งหมดรวมถึงตอนล่าสุดถูกบันทึกและซิงค์ขึ้น Supabase Cloud เรียบร้อยแล้ว ตอนนี้คุณสามารถ
-                      <strong className="text-emerald-300"> ปิดแท็บทั้งหมดใน Safari ทิ้งได้เลย </strong>
-                      ไม่ต้องกลัวหายอีกต่อไปครับ!
+                      {batchSavedCount > 0 ? (
+                        <>
+                          ข้อมูลทั้งหมดรวมถึงตอนล่าสุดถูกบันทึกและซิงค์ขึ้น Supabase Cloud เรียบร้อยแล้ว ตอนนี้คุณสามารถ
+                          <strong className="text-emerald-300"> ปิดแท็บทั้งหมดใน Safari ทิ้งได้เลย </strong>
+                          ไม่ต้องกลัวหายอีกต่อไปครับ!
+                        </>
+                      ) : (
+                        <>
+                          ตรวจสอบว่าได้วางลิงก์หน้าเรื่อง/ตอนอ่านการ์ตูนที่ถูกต้อง ไม่ใช่หน้าแรกของเว็บหรือเว็บขายสินค้า ({batchResults.length} รายการถูกข้าม)
+                        </>
+                      )}
                     </p>
                   </div>
 
@@ -921,6 +1081,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                     <button
                       onClick={() => {
                         setBatchFinished(false);
+                        setBatchSavedCount(0);
                         setBatchText("");
                         setBatchItems([]);
                         setBatchResults([]);
@@ -1154,6 +1315,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                           { val: "A", label: "🔥 Tier A" },
                           { val: "B", label: "✨ Tier B" },
                           { val: "C", label: "👍 Tier C" },
+                          { val: "D", label: "📌 Tier D" },
                         ].map((t) => (
                           <button
                             key={t.val}
@@ -1169,6 +1331,8 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
                                   ? "bg-sky-500 text-white shadow-md shadow-sky-500/30"
                                   : t.val === "C"
                                   ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                                  : t.val === "D"
+                                  ? "bg-slate-600 text-white shadow-md shadow-slate-600/30"
                                   : "bg-gray-600 text-white shadow-md"
                                 : "bg-[#0D1322] text-gray-400 hover:text-gray-200 border border-[#1F2E45]"
                             }`}
@@ -1251,7 +1415,7 @@ export const AddMangaModal: React.FC<AddMangaModalProps> = ({
           ) : (
             <button
               onClick={handleSave}
-              disabled={!title.trim()}
+              disabled={addedSuccess || !title.trim()}
               className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-40 shadow-lg shadow-violet-600/30 transition active:scale-95"
             >
               {addedSuccess ? (

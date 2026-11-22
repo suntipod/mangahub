@@ -7,7 +7,6 @@ interface BottomNavProps {
   currentTab: string;
   onTabChange: (tab: string) => void;
   onOpenAdd: () => void;
-  onOpenSettings: () => void;
   onOpenRandom: () => void;
   onOpenStats: () => void;
   unreadCount?: number;

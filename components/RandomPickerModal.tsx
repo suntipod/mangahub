@@ -38,6 +38,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
   const [pickedManga, setPickedManga] = useState<Manga | null>(null);
   const [shuffleTitle, setShuffleTitle] = useState("");
   const [shuffleCover, setShuffleCover] = useState("");
+  const [shuffleIsAdult, setShuffleIsAdult] = useState(false);
 
   const rollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -75,14 +76,17 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
   }, [mangas, filterMode]);
 
   // Execute roll logic
-  const handleRoll = () => {
+  const handleRoll = (force = false) => {
     if (candidatePool.length === 0) {
+      if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
+      setIsRolling(false);
       setPickedManga(null);
       setShuffleTitle("");
       setShuffleCover("");
+      setShuffleIsAdult(false);
       return;
     }
-    if (isRolling) return;
+    if (isRolling && !force) return;
 
     setIsRolling(true);
 
@@ -98,6 +102,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
       const randomItem = candidatePool[randomIndex];
       setShuffleTitle(randomItem.title);
       setShuffleCover(randomItem.cover_url || "");
+      setShuffleIsAdult(isAdultCategory(randomItem.category));
 
       if (counter >= maxSteps) {
         if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
@@ -110,6 +115,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
         setPickedManga(winner);
         setShuffleTitle(winner.title);
         setShuffleCover(winner.cover_url || "");
+        setShuffleIsAdult(isAdultCategory(winner.category));
         setIsRolling(false);
       }
     }, intervalTime);
@@ -118,7 +124,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
   // Trigger initial roll when modal opens or filter changes
   useEffect(() => {
     if (isOpen && candidatePool.length > 0) {
-      handleRoll();
+      handleRoll(true);
     } else {
       if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
       setIsRolling(false);
@@ -126,12 +132,23 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
         setPickedManga(null);
         setShuffleTitle("");
         setShuffleCover("");
+        setShuffleIsAdult(false);
       }
     }
     return () => {
       if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
     };
   }, [isOpen, filterMode, candidatePool.length]);
+
+  // Escape key closes modal
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -142,7 +159,15 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="สุ่มเรื่องอ่าน วันนี้อ่านเรื่องอะไรดี"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto"
+    >
       <div className="relative w-full max-w-lg bg-[#0D1322] border border-violet-500/30 rounded-3xl shadow-2xl overflow-hidden my-auto flex flex-col">
         {/* Header */}
         <div className="px-5 py-4 border-b border-[#1F2E45] bg-gradient-to-r from-violet-950/40 via-[#101726] to-[#0D1322] flex items-center justify-between">
@@ -211,7 +236,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
                 : "bg-[#141C30] text-gray-300 hover:text-white border border-[#1F2E45]"
             }`}
           >
-            📚 ทั้งหมด ({mangas.filter((m) => m.status !== "dropped").length || mangas.length})
+            📚 ทั้งหมด ({mangas.filter((m) => m.status !== "dropped").length})
           </button>
         </div>
 
@@ -250,7 +275,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
                       }
                     }}
                     className={`w-full h-full object-cover ${
-                      isDiscreetMode && isAdultCategory(pickedManga?.category)
+                      isDiscreetMode && (isRolling ? shuffleIsAdult : isAdultCategory(pickedManga?.category))
                         ? "blur-md"
                         : ""
                     }`}
@@ -374,7 +399,7 @@ export const RandomPickerModal: React.FC<RandomPickerModalProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     disabled={isRolling}
-                    onClick={handleRoll}
+                    onClick={() => handleRoll(false)}
                     className="flex-1 py-2.5 px-3 rounded-xl bg-[#141C30] hover:bg-[#1E2B45] text-amber-300 hover:text-amber-200 border border-amber-500/30 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition"
                   >
                     <Dices className={`w-4 h-4 ${isRolling ? "animate-spin" : ""}`} />

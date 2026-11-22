@@ -74,17 +74,17 @@ export const Header: React.FC<HeaderProps> = ({
     : "";
 
   return (
-    <header className="sticky top-0 z-30 backdrop-blur-xl bg-[#090D16]/90 border-b border-[#1E293B] pt-safe">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3">
-        <div className="flex items-center justify-between gap-2 sm:gap-3">
+    <header className="sticky top-0 z-30 backdrop-blur-xl bg-[#090D16]/90 border-b border-[#1E293B] pt-safe overflow-x-clip">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 xl:px-6 py-2.5 sm:py-3">
+        <div className="flex items-center justify-between gap-2 min-w-0">
           {/* Logo & Title */}
-          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-600/30 shrink-0">
-              <BookMarked className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+          <div className="flex items-center gap-2 shrink-0 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 xl:w-10 xl:h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-600/30 shrink-0">
+              <BookMarked className="w-4 h-4 sm:w-5 sm:h-5 xl:w-6 xl:h-6 text-white" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <h1 className="text-base sm:text-xl font-bold bg-gradient-to-r from-white via-violet-200 to-indigo-300 bg-clip-text text-transparent tracking-tight truncate">
+                <h1 className="text-sm sm:text-lg xl:text-xl font-bold bg-gradient-to-r from-white via-violet-200 to-indigo-300 bg-clip-text text-transparent tracking-tight truncate">
                   MangaHub
                 </h1>
                 {mangasCount > 0 && (
@@ -92,18 +92,19 @@ export const Header: React.FC<HeaderProps> = ({
                     className="px-1.5 py-0.5 text-[10px] font-extrabold rounded-md bg-violet-950/90 text-violet-300 border border-violet-700/50 shrink-0 tabular-nums"
                     title={`มีการ์ตูนทั้งหมด ${mangasCount} เรื่องในชั้นหนังสือ`}
                   >
-                    {mangasCount} เรื่อง
+                    {mangasCount}
+                    <span className="hidden sm:inline"> เรื่อง</span>
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
-                สมุดบันทึกตอนการ์ตูน & ซิงค์ข้ามอุปกรณ์
+              <p className="text-[11px] text-slate-400 hidden xl:block truncate">
+                สมุดบันทึกตอนการ์ตูน &amp; ซิงค์ข้ามอุปกรณ์
               </p>
             </div>
           </div>
 
-          {/* Search Bar (Desktop) */}
-          <div className="hidden md:flex flex-1 max-w-md mx-4">
+          {/* Search Bar (Desktop & Tablet) */}
+          <div className="hidden lg:flex flex-1 min-w-[180px] max-w-md mx-2 xl:mx-4">
             <div className="relative w-full">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -127,14 +128,14 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* Discreet Mode Toggle (Blur 18+ Covers) */}
             {onToggleDiscreet && (
               <button
                 onClick={onToggleDiscreet}
                 aria-label={isDiscreetMode ? "ปิดโหมดซ่อนปก 18+" : "เปิดโหมดซ่อนปก 18+"}
                 aria-pressed={isDiscreetMode}
-                className={`flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition active:scale-95 ${
+                className={`flex items-center justify-center gap-1.5 min-w-[36px] min-h-[36px] sm:min-h-[38px] px-2 rounded-xl text-xs font-bold border transition active:scale-95 ${
                   isDiscreetMode
                     ? "bg-rose-950/60 border-rose-700/60 text-rose-300 hover:bg-rose-900/60 shadow-lg shadow-rose-950/50"
                     : "bg-[#131B2E] border-[#1E293B] text-slate-300 hover:text-white hover:bg-[#1E293B]"
@@ -148,37 +149,37 @@ export const Header: React.FC<HeaderProps> = ({
                 {isDiscreetMode ? (
                   <>
                     <EyeOff className="w-4 h-4 text-rose-400 shrink-0" />
-                    <span className="hidden xl:inline">ซ่อนปก 18+</span>
+                    <span className="hidden 2xl:inline">ซ่อนปก 18+</span>
                   </>
                 ) : (
                   <>
                     <Eye className="w-4 h-4 text-slate-300 shrink-0" />
-                    <span className="hidden xl:inline">ปกปกติ</span>
+                    <span className="hidden 2xl:inline">ปกปกติ</span>
                   </>
                 )}
               </button>
             )}
 
-            {/* Random Manga Picker Button */}
+            {/* Random Manga Picker Button (on mobile, available in BottomNav) */}
             <button
               onClick={onOpenRandom}
               aria-label="สุ่มการ์ตูนอ่าน"
-              className="flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border bg-gradient-to-r from-amber-950/40 to-orange-950/40 border-amber-700/40 text-amber-300 hover:bg-amber-900/40 transition active:scale-95"
+              className="hidden sm:flex items-center justify-center gap-1.5 min-w-[36px] min-h-[38px] px-2 xl:px-2.5 py-2 rounded-xl text-xs font-bold border bg-gradient-to-r from-amber-950/40 to-orange-950/40 border-amber-700/40 text-amber-300 hover:bg-amber-900/40 transition active:scale-95"
               title="วันนี้อ่านเรื่องอะไรดี? สุ่มการ์ตูนจากชั้นหนังสือ"
             >
               <Dices className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="hidden lg:inline">สุ่มอ่าน</span>
+              <span className="hidden xl:inline">สุ่มอ่าน</span>
             </button>
 
-            {/* Reading Stats Dashboard Button */}
+            {/* Reading Stats Dashboard Button (on mobile, available in BottomNav) */}
             <button
               onClick={onOpenStats}
               aria-label="สถิติการอ่านส่วนตัว"
-              className="hidden sm:flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border bg-[#131B2E] border-[#1E293B] text-violet-300 hover:text-white hover:bg-[#1E293B] transition active:scale-95"
+              className="hidden sm:flex items-center justify-center gap-1.5 min-w-[36px] min-h-[38px] px-2 xl:px-2.5 py-2 rounded-xl text-xs font-bold border bg-[#131B2E] border-[#1E293B] text-violet-300 hover:text-white hover:bg-[#1E293B] transition active:scale-95"
               title="ดูสถิติการอ่านส่วนตัวของคุณ (Reading Stats)"
             >
               <BarChart3 className="w-4 h-4 text-violet-400 shrink-0" />
-              <span className="hidden lg:inline">สถิติ</span>
+              <span className="hidden xl:inline">สถิติ</span>
             </button>
 
             {/* Check Online Chapter Updates Button */}
@@ -187,7 +188,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={onCheckUpdates}
                 disabled={isCheckingUpdates}
                 aria-label="ตรวจหาตอนใหม่จากเว็บ"
-                className={`flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition active:scale-95 tabular-nums ${
+                className={`flex items-center justify-center gap-1.5 min-w-[36px] min-h-[36px] sm:min-h-[38px] px-2 xl:px-2.5 py-2 rounded-xl text-xs font-bold border transition active:scale-95 tabular-nums ${
                   isCheckingUpdates
                     ? "bg-orange-950/50 border-orange-700/60 text-orange-300 cursor-wait"
                     : "bg-orange-950/30 border-orange-800/50 text-orange-300 hover:bg-orange-900/40"
@@ -199,7 +200,7 @@ export const Header: React.FC<HeaderProps> = ({
                     isCheckingUpdates ? "animate-bounce" : ""
                   }`}
                 />
-                <span className="hidden lg:inline">
+                <span className="hidden xl:inline">
                   {isCheckingUpdates && checkProgress
                     ? `เช็กตอนใหม่ (${checkProgress.current}/${checkProgress.total})`
                     : "เช็กตอนใหม่"}
@@ -212,7 +213,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={supabaseConfig.enabled ? onSync : onOpenSettings}
               disabled={isSyncing || syncStatus === "syncing"}
               aria-label="สถานะการซิงค์ข้อมูล Cloud"
-              className={`flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold border transition active:scale-95 ${
+              className={`flex items-center justify-center gap-1.5 min-w-[36px] min-h-[36px] sm:min-h-[38px] px-2 xl:px-2.5 py-2 rounded-xl text-xs font-bold border transition active:scale-95 ${
                 !supabaseConfig.enabled || syncStatus === "disabled"
                   ? "bg-[#131B2E] border-[#1E293B] text-slate-300 hover:text-gray-100"
                   : syncStatus === "syncing" || isSyncing
@@ -236,17 +237,17 @@ export const Header: React.FC<HeaderProps> = ({
               {!supabaseConfig.enabled || syncStatus === "disabled" ? (
                 <>
                   <Cloud className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="hidden md:inline">ตั้งค่าซิงค์</span>
+                  <span className="hidden xl:inline">ตั้งค่าซิงค์</span>
                 </>
               ) : syncStatus === "syncing" || isSyncing ? (
                 <>
                   <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
-                  <span className="hidden sm:inline">กำลังซิงค์...</span>
+                  <span className="hidden xl:inline">กำลังซิงค์...</span>
                 </>
               ) : syncStatus === "offline" ? (
                 <>
                   <WifiOff className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  <span className="hidden sm:inline">ออฟไลน์</span>
+                  <span className="hidden xl:inline">ออฟไลน์</span>
                 </>
               ) : (
                 <>
@@ -254,20 +255,23 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 hidden sm:inline shrink-0" />
-                  <span className="hidden sm:inline">ซิงค์แล้ว</span>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 hidden xl:inline shrink-0" />
+                  <span className="hidden xl:inline">ซิงค์แล้ว</span>
                 </>
               )}
             </button>
 
-            {/* Add / Rescue Tab Button */}
+            {/* Add / Rescue Tab Button (on mobile, available in BottomNav) */}
             <button
               onClick={onOpenAdd}
               aria-label="กู้ชีพแท็บหรือเพิ่มการ์ตูนใหม่"
-              className="hidden sm:flex items-center gap-1.5 min-h-[40px] bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow-lg shadow-violet-600/25 transition active:scale-95"
+              title="กู้ชีพแท็บ / เพิ่มเรื่องใหม่"
+              className="hidden sm:flex items-center justify-center gap-1.5 min-w-[36px] min-h-[38px] bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold px-2.5 xl:px-3 py-2 rounded-xl text-xs shadow-lg shadow-violet-600/25 transition active:scale-95"
             >
               <Plus className="w-4 h-4 shrink-0" />
-              <span>กู้ชีพแท็บ / เพิ่มเรื่อง</span>
+              <span className="hidden lg:inline">
+                <span className="hidden 2xl:inline">กู้ชีพแท็บ / </span>เพิ่มเรื่อง
+              </span>
             </button>
 
             {/* Install App on iPhone / Mobile PWA Button */}
@@ -275,11 +279,11 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={onOpenInstallPwa}
                 aria-label="ติดตั้งแอปลงหน้าจอมือถือ"
-                className="flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-700/50 text-indigo-300 text-xs font-bold transition active:scale-95"
+                className="hidden sm:flex items-center justify-center gap-1.5 min-w-[36px] min-h-[38px] px-2 rounded-xl bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-700/50 text-indigo-300 text-xs font-bold transition active:scale-95"
                 title="วิธีติดตั้งแอป MangaHub ลงหน้าจอโฮม iPhone / Android"
               >
                 <Smartphone className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span className="hidden xl:inline">ติดตั้งแอป</span>
+                <span className="hidden 2xl:inline">ติดตั้งแอป</span>
               </button>
             )}
 
@@ -287,18 +291,18 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenBackup}
               aria-label="สำรองข้อมูลและกู้คืนไฟล์"
-              className="flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] px-2.5 sm:px-3 py-2 rounded-xl bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/50 text-emerald-300 text-xs font-bold transition active:scale-95"
+              className="flex items-center justify-center gap-1.5 min-w-[36px] min-h-[36px] sm:min-h-[38px] px-2 rounded-xl bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/50 text-emerald-300 text-xs font-bold transition active:scale-95"
               title="สำรองข้อมูลลงแฟลชไดรฟ์ / กู้คืนไฟล์ Backup JSON & Excel CSV"
             >
               <Database className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="hidden xl:inline">สำรองข้อมูล</span>
+              <span className="hidden 2xl:inline">สำรองข้อมูล</span>
             </button>
 
             {/* Settings Button */}
             <button
               onClick={onOpenSettings}
               aria-label="ตั้งค่าระบบและหมวดหมู่"
-              className="flex items-center justify-center min-w-[40px] min-h-[40px] p-2 rounded-xl bg-[#131B2E] hover:bg-[#1E293B] border border-[#1E293B] text-slate-300 hover:text-white transition active:scale-95"
+              className="flex items-center justify-center min-w-[36px] min-h-[36px] sm:min-h-[38px] p-2 rounded-xl bg-[#131B2E] hover:bg-[#1E293B] border border-[#1E293B] text-slate-300 hover:text-white transition active:scale-95"
               title="ตั้งค่าระบบ & จัดการหมวดหมู่"
             >
               <Settings className="w-4 h-4" />
@@ -307,7 +311,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Search Bar (Mobile) — uses text-base (16px) to prevent iOS Safari auto-zoom on focus */}
-        <div className="mt-2.5 md:hidden">
+        <div className="mt-2.5 lg:hidden">
           <div className="relative w-full">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input

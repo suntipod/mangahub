@@ -1,5 +1,5 @@
 // Service Worker for MangaHub PWA
-const CACHE_NAME = "mangahub-pwa-v1";
+const CACHE_NAME = "mangahub-pwa-v2";
 const STATIC_ASSETS = [
   "/",
   "/manifest.json",
@@ -37,17 +37,15 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch: Network first with cache fallback for HTML/assets; bypass APIs
+// Fetch: Network first with cache fallback for HTML/assets; bypass APIs & cross-origin
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Never cache API requests or external scraping / Supabase calls
+  // Only handle same-origin GET requests; never intercept APIs or third-party hosts
   if (
+    url.origin !== self.location.origin ||
     url.pathname.startsWith("/api/") ||
-    event.request.method !== "GET" ||
-    url.hostname.includes("supabase.co") ||
-    url.hostname.includes("anilist.co") ||
-    url.hostname.includes("mangadex.org")
+    event.request.method !== "GET"
   ) {
     return;
   }
@@ -65,15 +63,19 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       })
-      .catch(() => {
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          // If navigation fails and no cache, return root cache
-          if (event.request.mode === "navigate") {
-            return caches.match("/");
-          }
+      .catch(async () => {
+        const cachedResponse = await caches.match(event.request);
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        if (event.request.mode === "navigate") {
+          const rootCache = await caches.match("/");
+          if (rootCache) return rootCache;
+        }
+        return new Response("Offline", {
+          status: 503,
+          statusText: "Service Unavailable",
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
         });
       })
   );
